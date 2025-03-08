@@ -1755,55 +1755,38 @@
                                 console.error(`Error stopping ${track.kind} track:`, e);
                             }
                         });
+                        localStream = null;
                     } catch (e) {
-                        console.error('Error stopping local media tracks:', e);
-                    }
-                    localStream = null;
-                }
-                
-                // 2. Handle screen sharing resources
-                if (isScreenSharing) {
-                    console.log('Cleaning up screen sharing resources');
-                    try {
-                        if (window.originalCameraTrack) {
-                            try {
-                                window.originalCameraTrack.stop();
-                                console.log('Stopped original camera track');
-                            } catch (e) {
-                                console.error('Error stopping camera track:', e);
-                            }
-                            window.originalCameraTrack = null;
-                        }
-                        
-                        // Remove camera overlay
-                        const cameraOverlay = document.getElementById('cameraOverlay');
-                        if (cameraOverlay) {
-                            cameraOverlay.remove();
-                        }
-                        
-                        isScreenSharing = false;
-                    } catch (e) {
-                        console.error('Error cleaning up screen sharing:', e);
+                        console.error('Error stopping local stream:', e);
                     }
                 }
                 
-                // 3. Close all peer connections
-                const peerCount = Object.keys(peerConnections).length;
-                console.log(`Closing ${peerCount} peer connections`);
-                
+                // 2. Clean up all peer connections
                 Object.entries(peerConnections).forEach(([userId, pc]) => {
                     try {
-                        console.log(`Closing peer connection for user ${userId}`);
+                        // Stop all remote tracks
+                        const remoteStreams = pc.getRemoteStreams();
+                        remoteStreams.forEach(stream => {
+                            stream.getTracks().forEach(track => {
+                                try {
+                                    track.stop();
+                                    console.log(`Stopped remote ${track.kind} track for user ${userId}`);
+                                } catch (e) {
+                                    console.error(`Error stopping remote track for user ${userId}:`, e);
+                                }
+                            });
+                        });
                         
-                        // Stop all tracks sent by this peer connection
+                        // Stop all local tracks being sent to this peer
                         if (pc.getSenders) {
                             pc.getSenders().forEach(sender => {
-                                try {
-                                    if (sender.track) {
+                                if (sender.track) {
+                                    try {
                                         sender.track.stop();
+                                        console.log(`Stopped sender track for user ${userId}`);
+                                    } catch (e) {
+                                        console.error(`Error stopping sender track for user ${userId}:`, e);
                                     }
-                                } catch (senderError) {
-                                    console.error('Error stopping sender track:', senderError);
                                 }
                             });
                         }
@@ -1811,103 +1794,47 @@
                         // Clear any stats intervals
                         if (pc.statsIntervalId) {
                             clearInterval(pc.statsIntervalId);
-                            pc.statsIntervalId = null;
                         }
                         
                         // Close the connection
                         pc.close();
-                    } catch (pcError) {
-                        console.error(`Error closing peer connection for user ${userId}:`, pcError);
+                        console.log(`Closed peer connection for user ${userId}`);
+                    } catch (e) {
+                        console.error(`Error cleaning up peer connection for user ${userId}:`, e);
                     }
                 });
                 
-                // Reset peer connections object
+                // Clear all peer connections
                 peerConnections = {};
                 
-                // 4. Clean up remote video elements more efficiently
-                const remoteVideos = document.querySelectorAll('.video-wrapper:not(.local)');
-                remoteVideos.forEach(videoWrapper => {
-                    try {
-                        // Find and stop any video elements
-                        const videos = videoWrapper.querySelectorAll('video');
-                        videos.forEach(video => {
-                            try {
-                                if (video.srcObject) {
-                                    video.srcObject.getTracks().forEach(track => {
-                                        try {
-                                            track.stop();
-                                        } catch (e) {
-                                            console.error('Error stopping remote track:', e);
-                                        }
-                                    });
-                                    video.srcObject = null;
-                                }
-                                video.remove();
-                            } catch (e) {
-                                console.error('Error cleaning up remote video:', e);
+                // 3. Clean up video elements
+                const videoContainer = document.getElementById('videoContainer');
+                if (videoContainer) {
+                    const videos = videoContainer.getElementsByTagName('video');
+                    Array.from(videos).forEach(video => {
+                        try {
+                            if (video.srcObject) {
+                                const stream = video.srcObject;
+                                stream.getTracks().forEach(track => {
+                                    try {
+                                        track.stop();
+                                    } catch (e) {
+                                        console.error('Error stopping video track:', e);
+                                    }
+                                });
+                                video.srcObject = null;
                             }
-                        });
-                        
-                        // Now remove the wrapper
-                        videoWrapper.remove();
-                    } catch (e) {
-                        console.error('Error removing video wrapper:', e);
-                    }
-                });
-                
-                // 5. Clear any intervals and timers
-                if (statsInterval) {
-                    clearInterval(statsInterval);
-                    statsInterval = null;
-                }
-                
-                // Find and clear any other intervals or timers that might be running
-                const notificationElements = document.querySelectorAll('.participant-notification');
-                notificationElements.forEach(el => {
-                    try {
-                        // Clear any animation timers
-                        el.style.animation = 'none';
-                        el.remove();
-                    } catch (e) {
-                        console.error('Error cleaning up notification:', e);
-                    }
-                });
-                
-                // 6. Clear any meeting end messages
-                const meetingEndMessage = document.getElementById('meetingEndMessage');
-                if (meetingEndMessage) {
-                    meetingEndMessage.remove();
-                }
-                
-                // 7. Clear room state
-                roomId = null;
-                
-                // 8. Clear WebRTC state indicators
-                if (window.signaling) {
-                    // Don't delete the signaling object, just clear its state
-                    try {
-                        if (window.signaling.roomId) {
-                            window.signaling.roomId = null;
-                            window.signaling.userId = null;
-                            window.signaling.isHost = false;
+                        } catch (e) {
+                            console.error('Error cleaning up video element:', e);
                         }
-                    } catch (e) {
-                        console.error('Error resetting signaling state:', e);
-                    }
+                    });
                 }
                 
-                console.log('Resource cleanup completed successfully');
+                console.log('Resource cleanup completed');
             } catch (error) {
-                console.error('Fatal error during resource cleanup:', error);
-                // Try to do minimal cleanup
-                try {
-                    localStream = null;
-                    peerConnections = {};
-                    isScreenSharing = false;
-                    if (statsInterval) clearInterval(statsInterval);
-                } catch (e) {
-                    console.error('Error during emergency cleanup:', e);
-                }
+                console.error('Error during resource cleanup:', error);
+                // Even if there's an error, try to clear peer connections
+                peerConnections = {};
             }
         }
         
@@ -2197,51 +2124,115 @@
             signaling.on('user-left', (data) => {
                 console.log(`${data.userName || 'A user'} left the meeting`);
                 
-                // Show notification
-                if (data.userName) {
+                // Only show notification if it's not the current user leaving
+                if (data.userName && data.userId !== signaling.userId) {
                     showParticipantNotification(`${data.userName} left the meeting`, 'leave');
-                } else {
-                    showParticipantNotification(`A participant left the meeting`, 'leave');
                 }
                 
-                // Get the video wrapper
+                // Find and cleanup the video wrapper
                 const videoWrapper = document.getElementById(`video-wrapper-${data.userId}`);
                 if (videoWrapper) {
-                    // Apply leaving animation
+                    // Add leaving animation
                     videoWrapper.classList.add('leaving');
                     
                     // Remove element after animation completes
                     setTimeout(() => {
-                        // Close peer connection
+                        // Close peer connection with proper cleanup
                         const pc = peerConnections[data.userId];
                         if (pc) {
-                            // Stop all tracks from this peer
+                            try {
+                                // Only stop remote tracks from this specific peer
+                                const remoteStreams = pc.getRemoteStreams();
+                                remoteStreams.forEach(stream => {
+                                    stream.getTracks().forEach(track => {
+                                        track.stop();
+                                    });
+                                });
+                                
+                                // Don't stop local tracks, just remove them from this peer connection
+                                if (pc.getSenders) {
+                                    pc.getSenders().forEach(sender => {
+                                        try {
+                                            if (sender.track) {
+                                                // Instead of stopping the track, just remove it from the sender
+                                                sender.replaceTrack(null);
+                                            }
+                                        } catch (e) {
+                                            console.error(`Error removing track from sender for user ${userId}:`, e);
+                                        }
+                                    });
+                                }
+                                
+                                // Clear any stats intervals
+                                if (pc.statsIntervalId) {
+                                    clearInterval(pc.statsIntervalId);
+                                }
+                                
+                                // Close the connection
+                                pc.close();
+                                delete peerConnections[data.userId];
+                                
+                                // Clear video srcObject
+                                const video = videoWrapper.querySelector('video');
+                                if (video && video.srcObject) {
+                                    const stream = video.srcObject;
+                                    stream.getTracks().forEach(track => {
+                                        track.stop();
+                                    });
+                                    video.srcObject = null;
+                                }
+                            } catch (e) {
+                                console.error(`Error cleaning up peer connection for user ${data.userId}:`, e);
+                            }
+                        }
+                        
+                        // Remove video element after cleanup
+                        videoWrapper.remove();
+                        
+                        // Verify local video is still working
+                        const localVideo = document.getElementById('localVideo');
+                        if (localVideo && localVideo.srcObject) {
+                            const tracks = localVideo.srcObject.getTracks();
+                            if (tracks.length === 0 || tracks.every(track => track.readyState === 'ended')) {
+                                console.log('Local video tracks ended, attempting to restore...');
+                                // Attempt to restore local video if needed
+                                if (localStream) {
+                                    localVideo.srcObject = localStream;
+                                }
+                            }
+                        }
+                    }, 600); // Match animation duration
+                } else {
+                    // Fallback if element not found
+                    const pc = peerConnections[data.userId];
+                    if (pc) {
+                        try {
+                            // Only stop remote tracks
+                            const remoteStreams = pc.getRemoteStreams();
+                            remoteStreams.forEach(stream => {
+                                stream.getTracks().forEach(track => {
+                                    track.stop();
+                                });
+                            });
+                            
+                            // Remove local tracks from peer connection without stopping them
                             if (pc.getSenders) {
                                 pc.getSenders().forEach(sender => {
                                     if (sender.track) {
-                                        sender.track.stop();
+                                        sender.replaceTrack(null);
                                     }
                                 });
                             }
                             
-                            // Clear any stats intervals
                             if (pc.statsIntervalId) {
                                 clearInterval(pc.statsIntervalId);
                             }
                             
                             pc.close();
                             delete peerConnections[data.userId];
+                        } catch (e) {
+                            console.error(`Error cleaning up peer connection for user ${data.userId}:`, e);
                         }
-                        
-                        // Remove video element after animation
-                        videoWrapper.remove();
-                    }, 600); // Match animation duration
-                } else {
-                    // Fallback if element not found
-                    const pc = peerConnections[data.userId];
-                    if (pc) {
-                        pc.close();
-                        delete peerConnections[data.userId];
                     }
                 }
             });
