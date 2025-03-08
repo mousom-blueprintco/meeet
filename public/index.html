@@ -154,6 +154,173 @@
             height: calc(100vh - 100px);
         }
         
+        /* Mobile responsive styles */
+        @media (max-width: 768px) {
+            .video-grid {
+                grid-template-columns: 1fr;
+                height: calc(100vh - 120px);
+                padding: 8px;
+            }
+            
+            .meet-controls {
+                padding: 6px;
+                gap: 4px;
+            }
+            
+            .meet-button {
+                width: 36px;
+                height: 36px;
+            }
+            
+            .status-text {
+                top: 12px;
+                right: 12px;
+                font-size: 12px;
+                min-width: 150px;
+                padding: 10px;
+            }
+            
+            .meet-info {
+                top: 12px;
+                left: 12px;
+                padding: 10px;
+                font-size: 12px;
+                max-width: calc(50% - 24px);
+            }
+            
+            .meet-info .flex {
+                flex-wrap: wrap;
+                gap: 6px;
+            }
+            
+            .meet-info code {
+                max-width: 100%;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            
+            #copyRoomId {
+                padding: 4px 8px;
+                margin-top: 4px;
+                min-height: 30px;
+                min-width: 50px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                transition: all 0.2s ease;
+            }
+            
+            #copyRoomId:active {
+                transform: scale(0.95);
+            }
+            
+            /* Add a mobile-specific room ID tooltip */
+            @media (max-width: 480px) {
+                .meet-info code:active {
+                    white-space: normal;
+                    word-break: break-all;
+                    background: rgba(255, 255, 255, 0.2);
+                }
+                
+                #copyRoomId:active {
+                    background: rgba(138, 180, 248, 0.4);
+                }
+            }
+            
+            h1.text-2xl {
+                font-size: 1.25rem;
+            }
+            
+            .join-form {
+                width: 90%;
+                max-width: 320px;
+            }
+            
+            .meet-input {
+                font-size: 14px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .video-grid {
+                grid-template-columns: 1fr;
+                padding: 4px;
+                gap: 4px;
+            }
+            
+            .meet-controls {
+                bottom: 4px;
+                padding: 4px;
+                gap: 2px;
+            }
+            
+            .meet-button {
+                width: 32px;
+                height: 32px;
+            }
+            
+            .meet-button svg {
+                width: 20px;
+                height: 20px;
+            }
+            
+            .video-overlay {
+                bottom: 8px;
+                left: 8px;
+                font-size: 11px;
+            }
+            
+            .status-text, .meet-info {
+                padding: 8px;
+                font-size: 11px;
+            }
+            
+            .meet-info {
+                max-width: calc(60% - 16px);
+            }
+            
+            .meet-info .flex {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 4px;
+            }
+            
+            #copyRoomId {
+                margin-top: 2px;
+                padding: 4px 8px;
+                background: rgba(138, 180, 248, 0.2);
+                border-radius: 4px;
+                width: 100%;
+                text-align: center;
+            }
+        }
+        
+        @media (orientation: landscape) and (max-height: 480px) {
+            .video-grid {
+                height: calc(100vh - 60px);
+            }
+            
+            .meet-controls {
+                bottom: 2px;
+            }
+            
+            .video-wrapper {
+                height: calc(100vh - 70px);
+                aspect-ratio: auto;
+            }
+        }
+
+        /* Portrait orientation for mobile */
+        @media (orientation: portrait) and (max-width: 480px) {
+            .camera-overlay {
+                width: 80px;
+                height: 120px;
+                bottom: 70px;
+                right: 8px;
+            }
+        }
+        
         .video-wrapper {
             position: relative;
             border-radius: 8px;
@@ -310,7 +477,6 @@
         }
 
         .camera-overlay {
-            display: none;
             position: fixed;
             bottom: 24px;
             right: 24px;
@@ -323,16 +489,27 @@
             background: #3c4043;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
             transition: all 0.3s ease;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            transform: scale(1);
         }
-
+        
         .camera-overlay.active {
-            display: block;
+            display: flex;
         }
 
         .camera-overlay video {
             width: 100%;
             height: 100%;
             object-fit: cover;
+            min-width: 100%;
+            min-height: 100%;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            transition: all 0.3s ease;
         }
 
         .camera-overlay:hover {
@@ -342,12 +519,186 @@
 
         .camera-overlay .video-overlay {
             bottom: 8px;
-                left: 50%;
-                transform: translateX(-50%);
+            left: 50%;
+            transform: translateX(-50%);
             white-space: nowrap;
+            z-index: 2;
+        }
+        
+        /* Comprehensive responsive camera overlay styles */
+        /* Large tablets and small desktops */
+        @media (max-width: 1200px) {
+            .camera-overlay {
+                width: 160px;
+                height: 160px;
+                bottom: 24px;
+                right: 24px;
+            }
+        }
+        
+        /* Tablets */
+        @media (max-width: 992px) {
+            .camera-overlay {
+                width: 140px;
+                height: 140px;
+                bottom: 24px;
+                right: 20px;
+            }
+        }
+        
+        /* Small tablets */
+        @media (max-width: 768px) {
+            .camera-overlay {
+                width: 120px;
+                height: 120px;
+                bottom: 65px;
+                right: 15px;
+            }
+        }
+        
+        /* Large phones */
+        @media (max-width: 576px) {
+            .camera-overlay {
+                width: 100px;
+                height: 100px;
+                bottom: 60px;
+                right: 10px;
+                border-width: 2px;
+            }
+            
+            .camera-overlay .video-overlay {
+                font-size: 10px;
+                padding: 3px 6px;
+            }
+        }
+        
+        /* Small phones */
+        @media (max-width: 480px) {
+            .camera-overlay {
+                width: 80px;
+                height: 80px;
+                bottom: 55px;
+                right: 8px;
+            }
+            
+            /* Make buttons more touch-friendly on small screens */
+            .meet-button {
+                touch-action: manipulation;
+                min-width: 44px; /* Minimum touch target size */
+                min-height: 44px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            
+            /* Optimize join form for mobile */
+            .join-form {
+                padding: 16px;
+            }
+            
+            .meet-input {
+                padding: 10px;
+                font-size: 14px;
+                height: 44px; /* Minimum touch target height */
+            }
+            
+            .join-button {
+                padding: 10px;
+                height: 44px; /* Minimum touch target height */
+            }
+            
+            /* Fix video grid layout on very small screens */
+            .video-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            /* Improve notification positioning */
+            .notification {
+                width: 90%;
+                max-width: 300px;
+                padding: 8px;
+                font-size: 12px;
+            }
+        }
+        
+        /* Portrait orientation-specific adjustments */
+        @media (orientation: portrait) {
+            /* Medium to large phones in portrait */
+            @media (max-width: 576px) and (min-width: 481px) {
+                .camera-overlay {
+                    width: 90px;
+                    height: 90px;
+                    bottom: 65px;
+                }
+            }
+            
+            /* Small phones in portrait */
+            @media (max-width: 480px) {
+                .camera-overlay {
+                    width: 70px;
+                    height: 70px;
+                    border-width: 2px;
+                }
+            }
+        }
+        
+        /* Landscape orientation-specific adjustments */
+        @media (orientation: landscape) {
+            /* Regular landscape mode */
+            .camera-overlay {
+                bottom: 65px;
+            }
+            
+            /* Small landscape mode (like phones) */
+            @media (max-height: 480px) {
+                .camera-overlay {
+                    width: 70px;
+                    height: 70px;
+                    bottom: 55px;
+                    right: 10px;
+                    border-width: 2px;
+                }
+                
+                .camera-overlay .video-overlay {
+                    font-size: 9px;
+                    padding: 2px 4px;
+                    bottom: 4px;
+                }
+                
+                /* Join form adjustments for landscape */
+                .join-screen {
+                    padding: 10px;
+                }
+                
+                .join-form {
+                    padding: 12px;
+                    max-width: 350px;
+                }
+                
+                .meet-input, .join-button {
+                    margin-bottom: 8px;
+                    height: 40px;
+                }
+            }
+            
+            /* Very small height (like iPhone in landscape) */
+            @media (max-height: 380px) {
+                .camera-overlay {
+                    width: 60px;
+                    height: 60px;
+                    bottom: 45px;
+                    right: 8px;
+                }
+            }
+        }
+        
+        /* Ensure camera-overlay doesn't block controls on very small screens */
+        @media (max-width: 480px) and (max-height: 480px) {
+            .camera-overlay {
+                bottom: 50px;
+            }
         }
 
-        /* Remote user camera overlay styles */
         .remote-camera-overlay {
             position: absolute;
             bottom: 24px;
@@ -360,12 +711,21 @@
             background: #3c4043;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
             z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .remote-camera-overlay video {
             width: 100%;
             height: 100%;
             object-fit: cover;
+            min-width: 100%;
+            min-height: 100%;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
         }
 
         .remote-camera-overlay .video-overlay {
@@ -373,8 +733,9 @@
             left: 50%;
             transform: translateX(-50%);
             white-space: nowrap;
+            z-index: 2;
         }
-        
+
         /* Styles for disabled camera during screen sharing */
         .camera-overlay.camera-disabled::before {
             content: '';
@@ -399,6 +760,8 @@
             color: white;
             font-size: 14px;
             z-index: 6;
+            text-align: center;
+            width: 100%;
         }
         
         /* Add style for remote camera disabled as well */
@@ -425,6 +788,8 @@
             color: white;
             font-size: 14px;
             z-index: 6;
+            text-align: center;
+            width: 100%;
         }
 
         /* Add CSS to improve transitions */
@@ -713,6 +1078,325 @@
             width: 100%;
             height: 100%;
         }
+
+        .notification {
+            position: fixed;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(32, 33, 36, 0.95);
+            backdrop-filter: blur(30px);
+            border-radius: 8px;
+            padding: 12px 16px;
+            color: #fff;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            opacity: 0;
+            transform: translateX(-50%) translateY(-20px);
+            transition: all 0.3s ease-out;
+            font-weight: 400;
+            width: 400px;
+            max-width: 90%;
+        }
+        
+        /* Mobile notification adjustments */
+        @media (max-width: 768px) {
+            .notification {
+                width: 90%;
+                max-width: 400px;
+                top: 60px;
+                padding: 10px 14px;
+                font-size: 14px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .notification {
+                width: 85%;
+                max-width: 320px;
+                top: 50px;
+                padding: 8px 12px;
+                font-size: 13px;
+                gap: 8px;
+            }
+        }
+        
+        .notification.visible {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        /* Port notification adjustments */
+        @media (orientation: portrait) and (max-width: 480px) {
+            .camera-overlay {
+                width: 80px;
+                height: 120px;
+                bottom: 70px;
+                right: 8px;
+            }
+        }
+        
+        /* Room ID styles */
+        .meet-info code {
+            max-width: 160px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            display: inline-block;
+            transition: all 0.2s ease;
+        }
+        
+        #copyRoomId {
+            cursor: pointer;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        /* Responsive styles for remote camera overlay */
+        @media (max-width: 1200px) {
+            .remote-camera-overlay {
+                width: 160px;
+                height: 160px;
+            }
+        }
+        
+        @media (max-width: 992px) {
+            .remote-camera-overlay {
+                width: 140px;
+                height: 140px;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .remote-camera-overlay {
+                width: 120px;
+                height: 120px;
+                bottom: 20px;
+                right: 20px;
+            }
+        }
+        
+        @media (max-width: 576px) {
+            .remote-camera-overlay {
+                width: 100px;
+                height: 100px;
+                bottom: 16px;
+                right: 16px;
+                border-width: 2px;
+            }
+            
+            .remote-camera-overlay .video-overlay {
+                font-size: 10px;
+                padding: 3px 6px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .remote-camera-overlay {
+                width: 80px;
+                height: 80px;
+                bottom: 12px;
+                right: 12px;
+            }
+        }
+        
+        @media (orientation: landscape) and (max-height: 480px) {
+            .remote-camera-overlay {
+                width: 70px;
+                height: 70px;
+                bottom: 10px;
+                right: 10px;
+                border-width: 2px;
+            }
+            
+            .remote-camera-overlay .video-overlay {
+                font-size: 9px;
+                padding: 2px 4px;
+                bottom: 4px;
+            }
+        }
+        
+        @media (max-width: 576px) {
+            .camera-overlay.camera-disabled::after,
+            .remote-camera-overlay.camera-disabled::after {
+                font-size: 12px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .camera-overlay.camera-disabled::after,
+            .remote-camera-overlay.camera-disabled::after {
+                font-size: 10px;
+            }
+        }
+        
+        @media (orientation: landscape) and (max-height: 380px) {
+            .camera-overlay.camera-disabled::after,
+            .remote-camera-overlay.camera-disabled::after {
+                font-size: 9px;
+            }
+        }
+
+        /* Enhanced remote camera positioning for screen sharing */
+        .video-wrapper.screen-sharing .remote-camera-overlay {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: absolute;
+            z-index: 20;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        
+        .video-wrapper.screen-sharing .remote-camera-overlay video {
+            object-fit: cover;
+            min-width: 100%;
+            min-height: 100%;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 100%;
+            height: 100%;
+        }
+        
+        /* Fix remote camera positioning on different screen sizes during screen sharing */
+        @media (max-width: 576px) {
+            .video-wrapper.screen-sharing .remote-camera-overlay {
+                width: 100px;
+                height: 100px;
+                bottom: 16px;
+                right: 16px;
+                border-width: 2px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .video-wrapper.screen-sharing .remote-camera-overlay {
+                width: 70px;
+                height: 70px;
+                bottom: 12px;
+                right: 12px;
+            }
+        }
+        
+        @media (orientation: landscape) and (max-height: 480px) {
+            .video-wrapper.screen-sharing .remote-camera-overlay {
+                width: 65px;
+                height: 65px;
+                bottom: 10px;
+                right: 10px;
+                border-width: 2px;
+            }
+        }
+        
+        @media (orientation: landscape) and (max-height: 380px) {
+            .video-wrapper.screen-sharing .remote-camera-overlay {
+                width: 55px;
+                height: 55px;
+                bottom: 8px;
+                right: 8px;
+            }
+        }
+        
+        .video-wrapper.screen-sharing .remote-camera-overlay .video-overlay {
+            bottom: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            white-space: nowrap;
+            z-index: 5;
+            font-size: 12px;
+            padding: 3px 6px;
+            background: rgba(0, 0, 0, 0.7);
+        }
+        
+        /* Adjust text size for small screens */
+        @media (max-width: 576px) {
+            .video-wrapper.screen-sharing .remote-camera-overlay .video-overlay {
+                font-size: 10px;
+                padding: 2px 4px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .video-wrapper.screen-sharing .remote-camera-overlay .video-overlay {
+                font-size: 9px;
+                padding: 2px 3px;
+            }
+        }
+        
+        @media (orientation: landscape) and (max-height: 480px) {
+            .video-wrapper.screen-sharing .remote-camera-overlay .video-overlay {
+                font-size: 8px;
+                padding: 1px 3px;
+                bottom: 4px;
+            }
+        }
+
+        /* Camera off state during screen sharing */
+        .video-wrapper.screen-sharing .remote-camera-overlay.camera-disabled::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            z-index: 6;
+        }
+        
+        .video-wrapper.screen-sharing .remote-camera-overlay.camera-disabled::after {
+            content: 'Camera Off';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            z-index: 7;
+            text-align: center;
+            width: 100%;
+            font-size: 12px;
+        }
+        
+        @media (max-width: 576px) {
+            .video-wrapper.screen-sharing .remote-camera-overlay.camera-disabled::after {
+                font-size: 10px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .video-wrapper.screen-sharing .remote-camera-overlay.camera-disabled::after {
+                font-size: 8px;
+            }
+        }
+
+        /* Ensure remote camera overlay is visible when rejoining during screen share */
+        .video-wrapper.screen-sharing {
+            position: relative;
+        }
+        
+        /* Fix for rejoining during screen share - ensure camera overlay is visible */
+        .video-wrapper.screen-sharing:not(.has-remote-camera)::after {
+            content: '';
+            position: absolute;
+            z-index: 1;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        
+        .video-wrapper.screen-sharing.has-remote-camera .remote-camera-overlay {
+            visibility: visible;
+            opacity: 1;
+        }
+        
+        /* Ensure the remote camera overlay has proper initial visibility */
+        .remote-camera-overlay {
+            visibility: visible;
+            opacity: 1;
+            transition: visibility 0.3s ease, opacity 0.3s ease;
+        }
     </style>
 </head>
 <body>
@@ -729,8 +1413,10 @@
         <div class="meet-info">
             <div class="flex items-center gap-4">
                 <span class="text-sm">Room ID:</span>
-                <code id="currentRoomId" class="text-sm bg-[rgba(255,255,255,0.1)] px-2 py-1 rounded"></code>
-                <button id="copyRoomId" class="text-sm text-[#8ab4f8] hover:text-white">Copy</button>
+                <code id="currentRoomId" class="text-sm bg-[rgba(255,255,255,0.1)] px-2 py-1 rounded text-ellipsis overflow-hidden"></code>
+                <button id="copyRoomId" class="text-sm text-[#8ab4f8] hover:text-white flex items-center justify-center">
+                    <span>Copy</span>
+                </button>
             </div>
             </div>
 
@@ -934,6 +1620,28 @@
                         // Dispatch to registered listeners
                         if (this.listeners[signal.type]) {
                             this.listeners[signal.type].forEach(callback => callback(signal));
+                        }
+                        
+                        // Handle room-joined events to improve reconnection handling
+                        if (signal.type === 'room-joined' || signal.type === 'room-rejoined') {
+                            console.log(`Successfully ${signal.type === 'room-joined' ? 'joined' : 'rejoined'} room ${signal.roomId}`);
+                            
+                            // Dispatch a custom roomJoined event for the application to handle
+                            const roomJoinedEvent = new CustomEvent('roomJoined', {
+                                detail: {
+                                    roomId: signal.roomId,
+                                    userId: signal.userId,
+                                    isRejoin: signal.type === 'room-rejoined'
+                                }
+                            });
+                            window.dispatchEvent(roomJoinedEvent);
+                            
+                            // Force a delay and then check for screen share overlays
+                            setTimeout(() => {
+                                if (typeof checkAndRestoreScreenShareOverlays === 'function') {
+                                    checkAndRestoreScreenShareOverlays();
+                                }
+                            }, 1500);
                         }
                     } catch (error) {
                         console.error('Error parsing WebSocket message:', error);
@@ -2598,6 +3306,23 @@
                         
                         // Ensure we start stats monitoring
                         startPeerStats(pc, userId);
+                        
+                        // Check if this is a reconnection during screen sharing
+                        if (videoWrapper.classList.contains('screen-sharing')) {
+                            console.log(`Connection restored for ${userName} during screen sharing, ensuring camera overlay...`);
+                            
+                            // Create a sequence of checks at increasing intervals
+                            setTimeout(() => pc.restoreScreenShareView(), 500);
+                            setTimeout(() => pc.restoreScreenShareView(), 1500);
+                            setTimeout(() => pc.restoreScreenShareView(), 3000);
+                            
+                            // Also trigger the global checking function
+                            setTimeout(() => {
+                                if (typeof checkAndRestoreScreenShareOverlays === 'function') {
+                                    checkAndRestoreScreenShareOverlays();
+                                }
+                            }, 2000);
+                        }
                     } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
                         statusIndicator.className = 'status-indicator error';
                         videoWrapper.classList.add('problem');
@@ -2687,10 +3412,29 @@
                         videoWrapper.appendChild(cameraOverlay);
                     }
                     
-                    // Set camera stream
+                    // Set camera stream - create a fresh stream to ensure it's properly connected
                     const cameraStream = new MediaStream([cameraTrack]);
                     const cameraVideo = document.getElementById(`camera-video-${userId}`);
-                    cameraVideo.srcObject = cameraStream;
+                    
+                    if (cameraVideo) {
+                        // If we have an existing camera video element, update it
+                        cameraVideo.srcObject = cameraStream;
+                        
+                        // Ensure it plays
+                        cameraVideo.play().catch(e => console.warn(`Failed to play camera video: ${e.message}`));
+                    }
+                    
+                    // Add class to indicate remote camera is attached
+                    videoWrapper.classList.add('has-remote-camera');
+                    videoWrapper.classList.add('screen-sharing');
+                    
+                    // Ensure camera overlay is visible with stronger force
+                    cameraOverlay.style.cssText = `
+                        display: flex !important;
+                        visibility: visible !important;
+                        opacity: 1 !important;
+                        z-index: 20 !important;
+                    `;
                     
                     // Update disabled state for camera
                     if (!cameraTrack.enabled) {
@@ -2703,8 +3447,15 @@
                     cameraTrack.onmute = () => cameraOverlay.classList.add('camera-disabled');
                     cameraTrack.onunmute = () => cameraOverlay.classList.remove('camera-disabled');
                     
-                    // Update UI
-                    videoWrapper.classList.add('screen-sharing');
+                    // Log successful setup
+                    console.log(`Successfully set up screen sharing with camera for ${userName}`);
+                    
+                    // Trigger another check in 1 second to ensure everything is visible
+                    setTimeout(() => {
+                        if (typeof checkAndRestoreScreenShareOverlays === 'function') {
+                            checkAndRestoreScreenShareOverlays();
+                        }
+                    }, 1000);
                 } else {
                     // Regular video call - single video track
                     mainVideo.srcObject = stream;
@@ -2727,6 +3478,43 @@
                         statsDiv.textContent = 'Video Playing';
                     }
                 });
+            };
+            
+            // Handle track removal (disconnection/leaving)
+            pc.onremovetrack = event => {
+                console.log(`Track removed: ${event.track.kind} from ${userName}`);
+            };
+            
+            // Handle reconnection for screen share with camera overlay
+            pc.restoreScreenShareView = () => {
+                const videoWrapper = document.getElementById(`video-wrapper-${userId}`);
+                const cameraOverlay = document.getElementById(`camera-overlay-${userId}`);
+                
+                if (videoWrapper && videoWrapper.classList.contains('screen-sharing') && cameraOverlay) {
+                    // Ensure camera overlay is visible on reconnection
+                    videoWrapper.classList.add('has-remote-camera');
+                    cameraOverlay.style.display = 'flex';
+                    cameraOverlay.style.visibility = 'visible';
+                    cameraOverlay.style.opacity = '1';
+                    console.log(`Restored camera overlay for ${userName}`);
+                }
+            };
+            
+            // Add reconnection check when connection state becomes connected
+            const originalOnConnectionStateChange = pc.onconnectionstatechange;
+            pc.onconnectionstatechange = () => {
+                // Call the original handler
+                if (originalOnConnectionStateChange) {
+                    originalOnConnectionStateChange();
+                }
+                
+                // Additional logic for reconnection with screen share
+                if (pc.connectionState === 'connected') {
+                    // Restore screen share view if needed
+                    setTimeout(() => {
+                        pc.restoreScreenShareView();
+                    }, 1000); // Small delay to ensure all streams are processed
+                }
             };
             
             // Store peer connection
@@ -3198,6 +3986,215 @@
 
         // Create a debounced version of the updateConnectionStatus function
         const debounceUpdateConnectionStatus = debounce(updateConnectionStatus, 500);
+
+        // Add a function to check and restore screen share camera overlays
+        function checkAndRestoreScreenShareOverlays() {
+            // Look for all screen sharing video wrappers
+            const screenShareWrappers = document.querySelectorAll('.video-wrapper.screen-sharing');
+            
+            screenShareWrappers.forEach(wrapper => {
+                const userId = wrapper.id.replace('video-wrapper-', '');
+                const cameraOverlay = document.getElementById(`camera-overlay-${userId}`);
+                
+                if (cameraOverlay) {
+                    // Ensure the camera overlay is visible
+                    wrapper.classList.add('has-remote-camera');
+                    cameraOverlay.style.display = 'flex';
+                    cameraOverlay.style.visibility = 'visible';
+                    cameraOverlay.style.opacity = '1';
+                    console.log(`Automatically restored camera overlay for user ${userId}`);
+                }
+            });
+        }
+        
+        // Call the restore function when room is joined
+        window.addEventListener('roomJoined', () => {
+            // Give a short delay to allow all connections to establish
+            setTimeout(() => {
+                // Activate ongoing monitoring for screen shares
+                setupScreenShareMonitoring();
+            }, 2000);
+        });
+
+        // Add a more robust periodic checking mechanism for screen share camera overlays
+        function setupScreenShareMonitoring() {
+            // Initial check
+            checkAndRestoreScreenShareOverlays();
+            
+            // Set up a periodic check every 3 seconds
+            const monitoringInterval = setInterval(() => {
+                // Only run the check if we're in a conference
+                if (conferenceScreen.style.display !== 'none') {
+                    checkAndRestoreScreenShareOverlays();
+                } else {
+                    // Clear the interval if we're not in a conference
+                    clearInterval(monitoringInterval);
+                }
+            }, 3000);
+            
+            // Store the interval ID so it can be cleared if needed
+            window.screenShareMonitoringInterval = monitoringInterval;
+        }
+        
+        // Enhanced function to check and restore screen share overlays
+        function checkAndRestoreScreenShareOverlays() {
+            // Look for all screen sharing video wrappers
+            const screenShareWrappers = document.querySelectorAll('.video-wrapper.screen-sharing');
+            
+            // If no screen sharing is happening, nothing to do
+            if (screenShareWrappers.length === 0) {
+                return;
+            }
+            
+            console.log(`Checking ${screenShareWrappers.length} screen sharing wrappers for camera overlays...`);
+            
+            screenShareWrappers.forEach(wrapper => {
+                const userId = wrapper.id.replace('video-wrapper-', '');
+                let cameraOverlay = document.getElementById(`camera-overlay-${userId}`);
+                
+                // Check if we have a peer connection for this user
+                const pc = peerConnections[userId];
+                
+                if (!cameraOverlay && pc) {
+                    console.log(`Camera overlay missing for screen sharing user ${userId}, attempting to recreate it...`);
+                    
+                    // Attempt to create the missing camera overlay
+                    createMissingCameraOverlay(userId, wrapper, pc);
+                } else if (cameraOverlay) {
+                    // Ensure the camera overlay is visible and properly styled
+                    wrapper.classList.add('has-remote-camera');
+                    cameraOverlay.style.display = 'flex';
+                    cameraOverlay.style.visibility = 'visible';
+                    cameraOverlay.style.opacity = '1';
+                    
+                    // Also check if the video element inside is working
+                    const cameraVideo = document.getElementById(`camera-video-${userId}`);
+                    if (cameraVideo && (!cameraVideo.srcObject || !cameraVideo.srcObject.active)) {
+                        console.log(`Camera video feed missing for user ${userId}, attempting to restore...`);
+                        attemptToRestoreCameraFeed(userId, pc, cameraVideo);
+                    }
+                }
+            });
+        }
+        
+        // Function to create a missing camera overlay for a screen share
+        function createMissingCameraOverlay(userId, videoWrapper, pc) {
+            // Get the user name
+            const userName = getUserNameFromUserId(userId) || 'User';
+            
+            // Create the camera overlay
+            const cameraOverlay = document.createElement('div');
+            cameraOverlay.id = `camera-overlay-${userId}`;
+            cameraOverlay.className = 'remote-camera-overlay';
+            cameraOverlay.style.display = 'flex';
+            cameraOverlay.style.visibility = 'visible';
+            cameraOverlay.style.opacity = '1';
+            
+            // Create the camera video element
+            const cameraVideo = document.createElement('video');
+            cameraVideo.id = `camera-video-${userId}`;
+            cameraVideo.autoplay = true;
+            cameraVideo.playsInline = true;
+            
+            // Create the name overlay
+            const nameOverlay = document.createElement('div');
+            nameOverlay.className = 'video-overlay';
+            nameOverlay.textContent = userName;
+            
+            // Add elements to the overlay
+            cameraOverlay.appendChild(cameraVideo);
+            cameraOverlay.appendChild(nameOverlay);
+            videoWrapper.appendChild(cameraOverlay);
+            
+            // Add class to indicate remote camera is attached
+            videoWrapper.classList.add('has-remote-camera');
+            
+            // Try to find camera track from the peer connection
+            if (pc && pc.getReceivers) {
+                // Look through receivers for a video track that's not the screen share
+                pc.getReceivers().forEach(receiver => {
+                    if (receiver.track && receiver.track.kind === 'video') {
+                        // Get track settings to determine if it's a camera or screen
+                        const settings = receiver.track.getSettings();
+                        
+                        // This is likely the camera track if it's smaller than typical screen share
+                        if (!settings.displaySurface && (!settings.width || settings.width <= 1280)) {
+                            const cameraStream = new MediaStream([receiver.track]);
+                            cameraVideo.srcObject = cameraStream;
+                            console.log(`Restored camera feed for user ${userId} from existing track`);
+                            
+                            // Set disabled state if track is muted
+                            if (!receiver.track.enabled) {
+                                cameraOverlay.classList.add('camera-disabled');
+                            }
+                        }
+                    }
+                });
+            }
+            
+            return cameraOverlay;
+        }
+        
+        // Function to try to restore a camera feed for an existing overlay
+        function attemptToRestoreCameraFeed(userId, pc, cameraVideo) {
+            if (pc && pc.getReceivers) {
+                // Get all video tracks from the peer connection
+                const videoReceivers = pc.getReceivers().filter(r => 
+                    r.track && r.track.kind === 'video');
+                
+                if (videoReceivers.length >= 2) {
+                    // If we have 2+ video tracks, the smaller one is likely the camera
+                    let cameraTrack = null;
+                    
+                    for (const receiver of videoReceivers) {
+                        const settings = receiver.track.getSettings();
+                        // This is likely the camera track if it's smaller
+                        if (!settings.displaySurface && (!settings.width || settings.width <= 1280)) {
+                            cameraTrack = receiver.track;
+                            break;
+                        }
+                    }
+                    
+                    // If we still couldn't determine, use the second video track
+                    if (!cameraTrack && videoReceivers.length >= 2) {
+                        cameraTrack = videoReceivers[1].track;
+                    }
+                    
+                    if (cameraTrack) {
+                        const cameraStream = new MediaStream([cameraTrack]);
+                        cameraVideo.srcObject = cameraStream;
+                        console.log(`Restored camera feed for user ${userId} from receiver`);
+                        
+                        // Update disabled state
+                        const cameraOverlay = document.getElementById(`camera-overlay-${userId}`);
+                        if (cameraOverlay) {
+                            if (!cameraTrack.enabled) {
+                                cameraOverlay.classList.add('camera-disabled');
+                            } else {
+                                cameraOverlay.classList.remove('camera-disabled');
+                            }
+                        }
+                        
+                        return true;
+                    }
+                }
+            }
+            
+            return false;
+        }
+        
+        // Helper function to get a user name from user ID
+        function getUserNameFromUserId(userId) {
+            // Try to find the username in video overlays
+            const overlays = document.querySelectorAll('.video-overlay');
+            for (const overlay of overlays) {
+                const wrapper = overlay.closest('.video-wrapper');
+                if (wrapper && wrapper.id === `video-wrapper-${userId}`) {
+                    return overlay.textContent;
+                }
+            }
+            return null;
+        }
     </script>
 </body>
 </html>
