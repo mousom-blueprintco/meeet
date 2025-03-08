@@ -5,6 +5,7 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const compression = require('compression');
 
 // Load environment variables
 dotenv.config();
@@ -12,11 +13,35 @@ dotenv.config();
 // Initialize Express app and HTTP server
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocket.Server({ 
+  server,
+  perMessageDeflate: {
+    zlibDeflateOptions: {
+      chunkSize: 1024,
+      memLevel: 7,
+      level: 3
+    },
+    zlibInflateOptions: {
+      chunkSize: 10 * 1024
+    },
+    clientNoContextTakeover: true,
+    serverNoContextTakeover: true,
+    concurrencyLimit: 10,
+    threshold: 1024
+  }
+});
 
-// Enable CORS and serve static files
+// Enable CORS and use compression for all responses
 app.use(cors());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(compression());
+
+// Serve static files with proper caching
+const ONE_DAY = 86400000;
+app.use(express.static(path.join(__dirname, 'public'), {
+  maxAge: ONE_DAY,
+  etag: true,
+  lastModified: true
+}));
 
 // Add a route for the main page
 app.get('/', (req, res) => {
@@ -28,6 +53,10 @@ app.get('/join/:roomId', (req, res) => {
   res.redirect(`/?room=${req.params.roomId}`);
 });
 
+// Cache for frequently accessed data
+const roomCache = new Map();
+const clearRoomCache = (roomId) => roomCache.delete(roomId);
+
 // Data structures to store active rooms and their participants
 const rooms = new Map();
 const userSessions = new Map(); // Track user sessions for reconnection
@@ -36,8 +65,9 @@ const userSessions = new Map(); // Track user sessions for reconnection
 const PING_INTERVAL = 30000; // 30 seconds
 const CONNECTION_TIMEOUT = 10000; // 10 seconds for connection timeout
 
-// Ping all clients periodically to keep connections alive
-setInterval(() => {
+// Create a more efficient ping system with separate ping handling logic
+const pingIntervalId = setInterval(() => {
+  let totalPings = 0;
   wss.clients.forEach((ws) => {
     if (ws.isAlive === false) {
       // Connection is dead, handle disconnection
@@ -47,7 +77,12 @@ setInterval(() => {
 
     ws.isAlive = false;
     ws.ping();
+    totalPings++;
   });
+  
+  if (totalPings > 0) {
+    console.log(`Pinged ${totalPings} clients`);
+  }
 }, PING_INTERVAL);
 
 // Helper function to handle disconnection
@@ -101,6 +136,9 @@ function removeUserFromRoom(userId, roomId) {
     // Remove from user sessions
     userSessions.delete(userId);
     
+    // Clear any cached data for this user or room
+    clearRoomCache(roomId);
+    
     // Notify others in room
     broadcastToRoom(roomId, {
       type: 'user-left',
@@ -130,24 +168,45 @@ function removeUserFromRoom(userId, roomId) {
   }
 }
 
-// Helper function to broadcast message to all users in a room
+// Optimized broadcast function with message batching capability
 function broadcastToRoom(roomId, message, excludeUserId = null) {
   const room = rooms.get(roomId);
-  if (room) {
-    let sentCount = 0;
-    room.forEach((user, id) => {
-      if (id !== excludeUserId && user.connected && user.ws.readyState === WebSocket.OPEN) {
-        try {
-          user.ws.send(JSON.stringify(message));
-          sentCount++;
-        } catch (error) {
-          console.error(`Error sending message to user ${id}:`, error.message);
-        }
-      }
-    });
-    return sentCount;
+  if (!room) return 0;
+  
+  // Check if we can use a cached participant list
+  let cachedReceivers = roomCache.get(`${roomId}-receivers-${excludeUserId || 'none'}`);
+  let receivers;
+  
+  if (!cachedReceivers) {
+    // Create a list of receivers (participants who should receive the message)
+    receivers = Array.from(room.entries())
+      .filter(([id, user]) => id !== excludeUserId && user.connected)
+      .map(([id, user]) => user.ws);
+      
+    // Cache this list for future broadcasts (with a short TTL)
+    roomCache.set(`${roomId}-receivers-${excludeUserId || 'none'}`, receivers);
+    setTimeout(() => roomCache.delete(`${roomId}-receivers-${excludeUserId || 'none'}`), 1000);
+  } else {
+    receivers = cachedReceivers;
   }
-  return 0;
+  
+  // Convert message to JSON once instead of for each client
+  const jsonMessage = JSON.stringify(message);
+  let sentCount = 0;
+  
+  // Send message to all receivers
+  for (const ws of receivers) {
+    if (ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(jsonMessage);
+        sentCount++;
+      } catch (error) {
+        console.error('Error sending message:', error.message);
+      }
+    }
+  }
+  
+  return sentCount;
 }
 
 // WebSocket connection handler
@@ -162,7 +221,7 @@ wss.on('connection', (ws) => {
     ws.isAlive = true;
   });
 
-  // Handle incoming messages
+  // Handle incoming messages with optimized message handler
   ws.on('message', (message) => {
     let data;
     
@@ -179,44 +238,28 @@ wss.on('connection', (ws) => {
       return;
     }
     
-    // Log message type for debugging
-    console.log(`Received message type: ${data.type}`);
+    // Use a message handler map for faster processing instead of switch statement
+    const handlers = {
+      'join': handleJoin,
+      'reconnect': handleReconnect,
+      'offer': handleSignaling,
+      'answer': handleSignaling,
+      'ice-candidate': handleSignaling,
+      'leave': handleLeave,
+      'close-room': handleCloseRoom,
+      'message': handleChatMessage
+    };
     
-    // Handle different message types
-    switch (data.type) {
-      case 'join':
-        handleJoin(ws, data);
-        break;
-        
-      case 'reconnect':
-        handleReconnect(ws, data);
-        break;
-        
-      case 'offer':
-      case 'answer':
-      case 'ice-candidate':
-        handleSignaling(ws, data);
-        break;
-        
-      case 'leave':
-        handleLeave(ws, data);
-        break;
-        
-      case 'close-room':
-        handleCloseRoom(ws, data);
-        break;
-        
-      case 'message':
-        handleChatMessage(ws, data);
-        break;
-        
-      default:
-        console.warn(`Unknown message type: ${data.type}`);
-        ws.send(JSON.stringify({
-          type: 'error',
-          error: 'unknown-message-type',
-          message: `Unknown message type: ${data.type}`
-        }));
+    const handler = handlers[data.type];
+    if (handler) {
+      handler(ws, data);
+    } else {
+      console.warn(`Unknown message type: ${data.type}`);
+      ws.send(JSON.stringify({
+        type: 'error',
+        error: 'unknown-message-type',
+        message: `Unknown message type: ${data.type}`
+      }));
     }
   });
 
@@ -421,9 +464,10 @@ function handleSignaling(ws, data) {
   data.senderId = userId;
   data.senderName = senderUser ? senderUser.userName : null;
   
-  // Forward the message to the target user
+  // Forward the message to the target user - pre-stringify for performance
   try {
-    targetUser.ws.send(JSON.stringify(data));
+    const jsonMessage = JSON.stringify(data);
+    targetUser.ws.send(jsonMessage);
   } catch (error) {
     console.error(`Error forwarding ${type} to user ${targetUserId}:`, error.message);
     return sendError(ws, 'signaling-error', 'Failed to forward signaling message');
@@ -547,14 +591,23 @@ function handleChatMessage(ws, data) {
   }
 }
 
-// Helper function to send error messages
+// Optimized error sending function
 function sendError(ws, code, message) {
-  try {
-    ws.send(JSON.stringify({
+  // Cache commonly used error responses
+  const errorKey = `${code}-${message}`;
+  let errorJson = roomCache.get(errorKey);
+  
+  if (!errorJson) {
+    errorJson = JSON.stringify({
       type: 'error',
       error: code,
       message: message
-    }));
+    });
+    roomCache.set(errorKey, errorJson);
+  }
+  
+  try {
+    ws.send(errorJson);
   } catch (error) {
     console.error('Error sending error message:', error.message);
   }
@@ -571,13 +624,18 @@ server.listen(PORT, () => {
 process.on('SIGINT', () => {
   console.log('Shutting down server...');
   
+  // Clear the ping interval
+  clearInterval(pingIntervalId);
+  
   // Notify all clients about server shutdown
+  const shutdownMessage = JSON.stringify({
+    type: 'server-shutdown',
+    message: 'Server is shutting down'
+  });
+  
   wss.clients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify({
-        type: 'server-shutdown',
-        message: 'Server is shutting down'
-      }));
+      client.send(shutdownMessage);
     }
   });
   

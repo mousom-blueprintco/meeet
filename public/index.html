@@ -2638,19 +2638,35 @@
                     mainVideo = document.getElementById(`video-${userId}`);
                 }
                 
-                // Rest of ontrack handler...
-                // Check if this is a screen share (2 video tracks)
+                // Get all video tracks
                 const videoTracks = tracks.filter(t => t.kind === 'video');
+                
+                // Check if this is a screen share (2 video tracks)
                 if (videoTracks.length === 2) {
-                    // First track is screen share, second is camera
-                    const screenTrack = videoTracks[0];
-                    const cameraTrack = videoTracks[1];
+                    // Determine which track is screen share based on track settings
+                    let screenTrack, cameraTrack;
                     
-                    // Create screen share stream
+                    for (const track of videoTracks) {
+                        const settings = track.getSettings();
+                        // Screen share tracks typically have displaySurface property or larger dimensions
+                        if (settings.displaySurface || (settings.width > 1280 && settings.height > 720)) {
+                            screenTrack = track;
+                        } else {
+                            cameraTrack = track;
+                        }
+                    }
+                    
+                    // If we couldn't determine which is which, use the first as screen and second as camera
+                    if (!screenTrack || !cameraTrack) {
+                        screenTrack = videoTracks[0];
+                        cameraTrack = videoTracks[1];
+                    }
+                    
+                    // Create screen share stream for main video
                     const screenStream = new MediaStream([screenTrack]);
                     mainVideo.srcObject = screenStream;
                     
-                    // Create camera overlay
+                    // Create or update camera overlay
                     let cameraOverlay = document.getElementById(`camera-overlay-${userId}`);
                     if (!cameraOverlay) {
                         cameraOverlay = document.createElement('div');
@@ -2673,7 +2689,8 @@
                     
                     // Set camera stream
                     const cameraStream = new MediaStream([cameraTrack]);
-                    document.getElementById(`camera-video-${userId}`).srcObject = cameraStream;
+                    const cameraVideo = document.getElementById(`camera-video-${userId}`);
+                    cameraVideo.srcObject = cameraStream;
                     
                     // Update disabled state for camera
                     if (!cameraTrack.enabled) {
@@ -2689,7 +2706,7 @@
                     // Update UI
                     videoWrapper.classList.add('screen-sharing');
                 } else {
-                    // Regular video call
+                    // Regular video call - single video track
                     mainVideo.srcObject = stream;
                     videoWrapper.classList.remove('screen-sharing');
                     
