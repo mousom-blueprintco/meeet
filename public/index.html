@@ -1407,7 +1407,7 @@
                 opacity: 1 !important;
                 visibility: visible !important;
                 z-index: 2000 !important;
-                bottom: 16px !important; /* Slightly higher position */
+                bottom: 50px !important; /* Higher position to ensure reachability */
                 left: 50% !important;
                 transform: translateX(-50%) !important;
                 background: rgba(32, 33, 36, 0.95) !important;
@@ -1421,10 +1421,10 @@
             }
             
             .meet-button {
-                width: 40px !important;
-                height: 40px !important;
-                min-width: 40px !important;
-                min-height: 40px !important;
+                width: 48px !important; /* Larger touch target */
+                height: 48px !important; /* Larger touch target */
+                min-width: 48px !important;
+                min-height: 48px !important;
                 border-radius: 50% !important;
                 background-color: #3c4043 !important;
                 color: #fff !important;
@@ -1435,6 +1435,13 @@
                 justify-content: center !important;
                 margin: 0 4px !important;
                 opacity: 1 !important;
+                transition: background-color 0.2s ease !important;
+                -webkit-tap-highlight-color: transparent !important;
+            }
+            
+            /* Fix for the active state of buttons on Android */
+            .meet-button.active {
+                background-color: #ea4335 !important;
             }
             
             .meet-button.leave {
@@ -1459,6 +1466,7 @@
                     position: fixed !important;
                     visibility: visible !important;
                     opacity: 1 !important;
+                    bottom: 50px !important; /* Higher position to ensure reachability */
                 }
                 
                 .meet-button {
@@ -1466,10 +1474,17 @@
                     display: flex !important;
                     opacity: 1 !important;
                     visibility: visible !important;
+                    width: 48px !important; /* Larger touch target */
+                    height: 48px !important; /* Larger touch target */
+                    -webkit-tap-highlight-color: transparent !important;
+                }
+                
+                .meet-button.active {
+                    background-color: #ea4335 !important;
                 }
             }
         }
-
+        
         /* Additional Android SVG fixes */
         @media screen and (max-width: 768px) {
             /* Fix for Android Chrome SVG visibility issues */
@@ -1492,10 +1507,16 @@
                 display: flex !important;
                 align-items: center !important;
                 justify-content: center !important;
-                width: 40px !important;
-                height: 40px !important;
-                margin: 0 4px !important;
+                width: 48px !important; /* Larger size for better tap target */
+                height: 48px !important; /* Larger size for better tap target */
+                margin: 0 6px !important; /* Increase space between buttons */
                 overflow: visible !important;
+                -webkit-tap-highlight-color: transparent !important;
+            }
+            
+            /* Add active state for touch devices */
+            button.meet-button.active {
+                background-color: #ea4335 !important;
             }
             
             /* Specific style for the leave button */
@@ -1503,10 +1524,11 @@
                 background-color: #ea4335 !important;
             }
             
-            /* Increase tap target for mobile */
+            /* Increase tap target for mobile and move higher for better reachability */
             .meet-controls {
-                padding: 8px 12px !important;
-                bottom: 16px !important;
+                padding: 10px 12px !important;
+                bottom: 50px !important; /* Higher position to ensure reachability */
+                gap: 6px !important;
             }
         }
         
@@ -1516,6 +1538,45 @@
             visibility: visible !important;
             opacity: 1 !important;
             z-index: 2000 !important;
+        }
+
+        /* Additional styles for touch feedback */
+        .meet-button.touch-active {
+            transform: scale(0.95) !important;
+            opacity: 0.9 !important;
+        }
+
+        /* Fix for camera-overlay positioning when controls are higher */
+        @media (max-width: 576px) {
+            .camera-overlay {
+                bottom: 120px !important; /* Move up to prevent overlap with raised controls */
+            }
+        }
+
+        /* Add touch-specific active state for buttons */
+        @media (hover: none) {
+            /* Target touch devices specifically */
+            .meet-button:active, 
+            .meet-button.active, 
+            .meet-button.touch-active {
+                background-color: #ea4335 !important;
+                transform: scale(0.95) !important;
+                transition: transform 0.1s ease-out, background-color 0.1s ease-out !important;
+            }
+            
+            /* Make sure leave button stays red and just changes opacity on touch */
+            .meet-button.leave:active,
+            .meet-button.leave.touch-active {
+                opacity: 0.8 !important;
+                transform: scale(0.95) !important;
+            }
+            
+            /* Fix active state rendering for buttons */
+            button.meet-button.active svg,
+            button.meet-button:active svg {
+                opacity: 1 !important;
+                visibility: visible !important;
+            }
         }
     </style>
 </head>
@@ -4315,6 +4376,52 @@
             }
             return null;
         }
+
+        // Add touch event handlers for better mobile responsiveness
+        toggleAudioButton.addEventListener('touchstart', function(e) {
+            e.preventDefault(); // Prevent default touch behavior
+            this.classList.add('touch-active'); // Visual feedback
+        }, { passive: false });
+
+        toggleAudioButton.addEventListener('touchend', function(e) {
+            e.preventDefault(); // Prevent default touch behavior
+            this.classList.remove('touch-active');
+            toggleAudio(); // Call the toggle function
+        }, { passive: false });
+
+        toggleVideoButton.addEventListener('touchstart', function(e) {
+            e.preventDefault(); // Prevent default touch behavior
+            this.classList.add('touch-active'); // Visual feedback
+        }, { passive: false });
+
+        toggleVideoButton.addEventListener('touchend', function(e) {
+            e.preventDefault(); // Prevent default touch behavior
+            this.classList.remove('touch-active');
+            toggleVideo(); // Call the toggle function
+        }, { passive: false });
+
+        // Also add touch events for the other buttons for consistency
+        shareScreenButton.addEventListener('touchstart', function(e) {
+            e.preventDefault();
+            this.classList.add('touch-active');
+        }, { passive: false });
+
+        shareScreenButton.addEventListener('touchend', function(e) {
+            e.preventDefault();
+            this.classList.remove('touch-active');
+            toggleScreenShare();
+        }, { passive: false });
+
+        leaveCallButton.addEventListener('touchstart', function(e) {
+            e.preventDefault();
+            this.classList.add('touch-active');
+        }, { passive: false });
+
+        leaveCallButton.addEventListener('touchend', function(e) {
+            e.preventDefault();
+            this.classList.remove('touch-active');
+            leaveCall();
+        }, { passive: false });
     </script>
 </body>
 </html>
