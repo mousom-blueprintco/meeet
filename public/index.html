@@ -1578,6 +1578,80 @@
                 visibility: visible !important;
             }
         }
+
+        /* Notification styles */
+        .notification {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-100px);
+            z-index: 9999;
+            background: rgba(32, 33, 36, 0.9);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            max-width: 90%;
+            width: auto;
+            text-align: center;
+            font-size: 14px;
+            opacity: 0;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(5px);
+        }
+
+        .notification.showing {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
+
+        .notification-content {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .notification-info {
+            border-left: 4px solid #4285f4;
+        }
+
+        .notification-warning {
+            border-left: 4px solid #fbbc05;
+        }
+
+        .notification-error {
+            border-left: 4px solid #ea4335;
+        }
+
+        /* Mobile-specific styles for screen sharing button */
+        @media (max-width: 768px) {
+            /* Hide screen share button on iOS since it's not supported */
+            html.ios #shareScreen {
+                display: none !important;
+            }
+            
+            /* Special styling for Android screen share button to indicate it might not work everywhere */
+            html.android #shareScreen {
+                position: relative;
+            }
+            
+            html.android #shareScreen::after {
+                content: "?";
+                position: absolute;
+                top: -5px;
+                right: -5px;
+                background: #fbbc05;
+                color: #000;
+                border-radius: 50%;
+                width: 16px;
+                height: 16px;
+                font-size: 10px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-weight: bold;
+            }
+        }
     </style>
 </head>
 <body>
@@ -2395,62 +2469,141 @@
             }
         }
 
-        // Toggle screen sharing
+        // Function to detect mobile devices
+        function isMobileDevice() {
+            return (
+                /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+                (navigator.maxTouchPoints && navigator.maxTouchPoints > 2 && /Mobi|Android/i.test(navigator.userAgent))
+            );
+        }
+
+        // Function to detect iOS devices specifically
+        function isIOSDevice() {
+            return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+        }
+
+        // Function to detect Android devices specifically
+        function isAndroidDevice() {
+            return /Android/i.test(navigator.userAgent);
+        }
+
+        // Function to show a notification
+        function showNotification(message, type = 'info', duration = 5000) {
+            const notification = document.createElement('div');
+            notification.className = `notification notification-${type}`;
+            notification.innerHTML = `<div class="notification-content">${message}</div>`;
+            
+            document.body.appendChild(notification);
+            
+            // Add showing class for animation
+            setTimeout(() => {
+                notification.classList.add('showing');
+            }, 10);
+            
+            // Auto dismiss after duration
+            setTimeout(() => {
+                notification.classList.remove('showing');
+                setTimeout(() => {
+                    notification.remove();
+                }, 300);
+            }, duration);
+        }
+
+        // Toggle screen sharing with mobile device support
         async function toggleScreenShare() {
             try {
                 if (!isScreenSharing) {
+                    // Check if on mobile device
+                    if (isMobileDevice()) {
+                        // Special handling for iOS (not supported)
+                        if (isIOSDevice()) {
+                            showNotification('Screen sharing is not supported on iOS browsers. Please use a desktop browser for this feature.', 'warning', 5000);
+                            return;
+                        }
+                        
+                        // Special handling for Android
+                        if (isAndroidDevice()) {
+                            // Show guidance for Android users
+                            showNotification('On Android, you may need to enable screen sharing in your browser settings. Look for "Site settings" > "Screen sharing" or similar options.', 'info', 8000);
+                            
+                            // Different options for Android
+                            const screenConstraints = {
+                                video: {
+                                    displaySurface: 'window',
+                                    logicalSurface: true,
+                                    cursor: 'never'
+                                }
+                            };
+                            
+                            try {
+                                const screenStream = await navigator.mediaDevices.getDisplayMedia(screenConstraints);
+                                handleScreenShareSuccess(screenStream);
+                            } catch (err) {
+                                console.error('Error accessing screen on Android:', err);
+                                showNotification('Unable to access screen. This feature may not be supported on your device or browser version.', 'error');
+                            }
+                            return;
+                        }
+                    }
+                    
+                    // Default desktop handling
                     const screenStream = await navigator.mediaDevices.getDisplayMedia({
                         video: { cursor: 'always' }
                     });
                     
-                    const screenTrack = screenStream.getVideoTracks()[0];
-                    window.originalCameraTrack = localStream.getVideoTracks()[0];
-                    
-                    // Create a new stream with both screen share and camera tracks
-                    const combinedStream = new MediaStream();
-                    combinedStream.addTrack(screenTrack);
-                    combinedStream.addTrack(window.originalCameraTrack);
-                    
-                    // Replace tracks in all peer connections
-                    await Promise.all(Object.values(peerConnections).map(async pc => {
-                        // First, find and remove any existing video senders
-                        const senders = pc.getSenders();
-                        const videoSenders = senders.filter(sender => 
-                            sender.track && sender.track.kind === 'video');
-                        
-                        // Remove existing video tracks
-                        for (const sender of videoSenders) {
-                            pc.removeTrack(sender);
-                        }
-                        
-                        // Add both screen share and camera tracks
-                        pc.addTrack(screenTrack, combinedStream);
-                        pc.addTrack(window.originalCameraTrack, combinedStream);
-                    }));
-                    
-                    // Update local video to show screen share
-                    localStream.removeTrack(window.originalCameraTrack);
-                    localStream.addTrack(screenTrack);
-                    localVideo.srcObject = localStream;
-                    
-                    // Create camera overlay with the original camera feed
-                    createCameraOverlay();
-                    
-                    screenTrack.onended = async () => {
-                        await stopScreenShare();
-                    };
-                    
-                    isScreenSharing = true;
-                    shareScreenButton.classList.add('active');
+                    handleScreenShareSuccess(screenStream);
                 } else {
                     await stopScreenShare();
                 }
-                    } catch (error) {
-                        console.error('Error sharing screen:', error);
-                alert('Could not share screen. Please check permissions.');
+            } catch (error) {
+                console.error('Error sharing screen:', error);
+                showNotification('Could not share screen. Please check permissions.', 'error');
                 isScreenSharing = false;
                 shareScreenButton.classList.remove('active');
             }
+        }
+
+        // Handle successful screen share acquisition
+        function handleScreenShareSuccess(screenStream) {
+            const screenTrack = screenStream.getVideoTracks()[0];
+            window.originalCameraTrack = localStream.getVideoTracks()[0];
+            
+            // Create a new stream with both screen share and camera tracks
+            const combinedStream = new MediaStream();
+            combinedStream.addTrack(screenTrack);
+            combinedStream.addTrack(window.originalCameraTrack);
+            
+            // Replace tracks in all peer connections
+            Promise.all(Object.values(peerConnections).map(async pc => {
+                // First, find and remove any existing video senders
+                const senders = pc.getSenders();
+                const videoSenders = senders.filter(sender => 
+                    sender.track && sender.track.kind === 'video');
+                
+                // Remove existing video tracks
+                for (const sender of videoSenders) {
+                    pc.removeTrack(sender);
+                }
+                
+                // Add both screen share and camera tracks
+                pc.addTrack(screenTrack, combinedStream);
+                pc.addTrack(window.originalCameraTrack, combinedStream);
+            }));
+            
+            // Update local video to show screen share
+            localStream.removeTrack(window.originalCameraTrack);
+            localStream.addTrack(screenTrack);
+            localVideo.srcObject = localStream;
+            
+            // Create camera overlay with the original camera feed
+            createCameraOverlay();
+            
+            screenTrack.onended = async () => {
+                await stopScreenShare();
+            };
+            
+            isScreenSharing = true;
+            shareScreenButton.classList.add('active');
         }
 
         // Function to create camera overlay for screen sharing
@@ -4422,6 +4575,29 @@
             this.classList.remove('touch-active');
             leaveCall();
         }, { passive: false });
+
+        // Add device detection on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            // Add device-specific classes to HTML element
+            const htmlElement = document.documentElement;
+            
+            if (isMobileDevice()) {
+                htmlElement.classList.add('mobile');
+                
+                if (isIOSDevice()) {
+                    htmlElement.classList.add('ios');
+                    // Hide screen share button on iOS since it's not supported
+                    const shareScreenButton = document.getElementById('shareScreen');
+                    if (shareScreenButton) {
+                        shareScreenButton.style.display = 'none';
+                    }
+                } else if (isAndroidDevice()) {
+                    htmlElement.classList.add('android');
+                }
+            } else {
+                htmlElement.classList.add('desktop');
+            }
+        });
     </script>
 </body>
 </html>
