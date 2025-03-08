@@ -1397,6 +1397,126 @@
             opacity: 1;
             transition: visibility 0.3s ease, opacity 0.3s ease;
         }
+
+        /* Android Chrome specific fixes */
+        @supports (-webkit-touch-callout: none) and (not (translate: none)) {
+            /* Target Android Chrome */
+            .meet-controls {
+                position: fixed !important;
+                display: flex !important;
+                opacity: 1 !important;
+                visibility: visible !important;
+                z-index: 2000 !important;
+                bottom: 16px !important; /* Slightly higher position */
+                left: 50% !important;
+                transform: translateX(-50%) !important;
+                background: rgba(32, 33, 36, 0.95) !important;
+                backdrop-filter: blur(30px) !important;
+                border-radius: 32px !important;
+                padding: 8px !important;
+                gap: 8px !important;
+                width: auto !important;
+                min-width: 200px !important;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+            }
+            
+            .meet-button {
+                width: 40px !important;
+                height: 40px !important;
+                min-width: 40px !important;
+                min-height: 40px !important;
+                border-radius: 50% !important;
+                background-color: #3c4043 !important;
+                color: #fff !important;
+                border: none !important;
+                cursor: pointer !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                margin: 0 4px !important;
+                opacity: 1 !important;
+            }
+            
+            .meet-button.leave {
+                background: #ea4335 !important;
+            }
+            
+            .meet-button svg {
+                width: 24px !important;
+                height: 24px !important;
+                stroke: currentColor !important;
+                stroke-width: 2 !important;
+                display: block !important;
+                opacity: 1 !important;
+            }
+        }
+        
+        /* Alternative Android Chrome fix using user agent detection */
+        @media screen and (-webkit-min-device-pixel-ratio:0) {
+            @supports (not (-webkit-touch-callout:inherit)) {
+                /* Target Android browsers, but not iOS */
+                .meet-controls {
+                    position: fixed !important;
+                    visibility: visible !important;
+                    opacity: 1 !important;
+                }
+                
+                .meet-button {
+                    position: relative !important;
+                    display: flex !important;
+                    opacity: 1 !important;
+                    visibility: visible !important;
+                }
+            }
+        }
+
+        /* Additional Android SVG fixes */
+        @media screen and (max-width: 768px) {
+            /* Fix for Android Chrome SVG visibility issues */
+            button.meet-button svg {
+                display: block !important;
+                visibility: visible !important;
+                opacity: 1 !important;
+                fill: none !important;
+                stroke: currentColor !important;
+                stroke-width: 2px !important;
+                min-width: 24px !important;
+                min-height: 24px !important;
+            }
+            
+            /* Add background color to SVG parent to ensure visibility */
+            button.meet-button {
+                position: relative !important;
+                background-color: #3c4043 !important;
+                border-radius: 50% !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                width: 40px !important;
+                height: 40px !important;
+                margin: 0 4px !important;
+                overflow: visible !important;
+            }
+            
+            /* Specific style for the leave button */
+            button.meet-button.leave {
+                background-color: #ea4335 !important;
+            }
+            
+            /* Increase tap target for mobile */
+            .meet-controls {
+                padding: 8px 12px !important;
+                bottom: 16px !important;
+            }
+        }
+        
+        /* Ensure controls are always visible */
+        #meetControls {
+            display: flex !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+            z-index: 2000 !important;
+        }
     </style>
 </head>
 <body>
@@ -1433,30 +1553,30 @@
             </div>
         </div>
 
-        <div class="fixed bottom-8 left-1/2 transform -translate-x-1/2 meet-controls flex items-center">
-            <button id="toggleAudio" class="meet-button">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <div id="meetControls" class="fixed bottom-8 left-1/2 transform -translate-x-1/2 meet-controls flex items-center" style="z-index: 2000; display: flex !important;">
+            <button id="toggleAudio" class="meet-button" type="button" aria-label="Toggle microphone">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: block;">
                         <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
                         <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
                         <line x1="12" y1="19" x2="12" y2="23"></line>
                         <line x1="8" y1="23" x2="16" y2="23"></line>
                     </svg>
             </button>
-            <button id="toggleVideo" class="meet-button">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <button id="toggleVideo" class="meet-button" type="button" aria-label="Toggle camera">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: block;">
                         <polygon points="23 7 16 12 23 17 23 7"></polygon>
                         <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
                     </svg>
             </button>
-            <button id="shareScreen" class="meet-button">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <button id="shareScreen" class="meet-button" type="button" aria-label="Share screen">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: block;">
                         <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
                         <line x1="8" y1="21" x2="16" y2="21"></line>
                         <line x1="12" y1="17" x2="12" y2="21"></line>
                     </svg>
             </button>
-            <button id="leaveCall" class="meet-button leave">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <button id="leaveCall" class="meet-button leave" type="button" aria-label="Leave call">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: block;">
                         <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"></path>
                         <line x1="1" y1="1" x2="23" y2="23"></line>
                     </svg>
