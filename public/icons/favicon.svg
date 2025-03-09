@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Circular background -->
+  <circle cx="256" cy="256" r="256" fill="#C5D3FF" />
+  
+  <!-- Inner glowing circle for premium feel -->
+  <circle cx="256" cy="256" r="220" fill="#D6E1FF" />
+  
+  <!-- Subtle pulse animation for low-latency concept -->
+  <circle cx="256" cy="256" r="190" fill="#E2EAFF" />
+  
+  <!-- Main camera body with rounded corners -->
+  <rect x="136" y="196" width="160" height="120" rx="24" fill="#2D6CFF" />
+  
+  <!-- Camera lens element -->
+  <path d="M296 216 L376 176 L376 336 L296 296 Z" fill="#2D6CFF" />
+  
+  <!-- Highlight for 3D effect -->
+  <rect x="136" y="196" width="160" height="30" rx="24" fill="#4F84FF" />
+  
+  <!-- Camera lens highlight -->
+  <path d="M296 216 L376 176 L376 206 L296 246 Z" fill="#4F84FF" />
+  
+  <!-- Record indicator -->
+  <circle cx="166" cy="226" r="10" fill="#FF3B30" opacity="0.9" />
+  
+  <!-- Signal quality indicators -->
+  <g transform="translate(180, 246)" fill="#FFFFFF" opacity="0.7">
+    <rect x="0" y="0" width="8" height="20" rx="4" />
+    <rect x="16" y="-6" width="8" height="26" rx="4" />
+    <rect x="32" y="-12" width="8" height="32" rx="4" />
+    <rect x="48" y="-18" width="8" height="38" rx="4" />
+  </g>
+  
+  <!-- Subtle reflection -->
+  <rect x="146" y="206" width="140" height="4" rx="2" fill="#FFFFFF" opacity="0.3" />
+  
+  <!-- Ultra-thin speed lines for low-latency concept -->
+  <g stroke="#2D6CFF" stroke-width="1.5" opacity="0.15">
+    <circle cx="256" cy="256" r="150" fill="none" />
+    <circle cx="256" cy="256" r="168" fill="none" />
+    <circle cx="256" cy="256" r="186" fill="none" />
+  </g>
+</svg>

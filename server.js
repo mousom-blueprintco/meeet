@@ -65,6 +65,59 @@ const userSessions = new Map(); // Track user sessions for reconnection
 const PING_INTERVAL = 30000; // 30 seconds
 const CONNECTION_TIMEOUT = 10000; // 10 seconds for connection timeout
 
+// Add room activity tracking
+const ROOM_CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const ROOM_INACTIVE_THRESHOLD = 2 * 60 * 1000; // 2 minutes
+const roomActivity = new Map();
+
+// Add room activity monitoring system
+function updateRoomActivity(roomId) {
+    roomActivity.set(roomId, Date.now());
+}
+
+// Add room cleanup interval
+const roomCleanupInterval = setInterval(() => {
+    const now = Date.now();
+    let cleanedRooms = 0;
+    
+    rooms.forEach((room, roomId) => {
+        const lastActivity = roomActivity.get(roomId) || 0;
+        const isInactive = now - lastActivity > ROOM_INACTIVE_THRESHOLD;
+        
+        if (isInactive) {
+            // Check if room is actually empty or has only disconnected users
+            const hasActiveUsers = Array.from(room.values()).some(user => 
+                user.connected && user.ws.readyState === WebSocket.OPEN
+            );
+            
+            if (!hasActiveUsers) {
+                console.log(`Cleaning up inactive room: ${roomId}, last activity: ${new Date(lastActivity).toISOString()}`);
+                
+                // Notify any remaining users about room closure
+                broadcastToRoom(roomId, {
+                    type: 'room-closed',
+                    roomId: roomId,
+                    reason: 'Room closed due to inactivity'
+                });
+                
+                // Clean up all user sessions for this room
+                room.forEach((user, userId) => {
+                    userSessions.delete(userId);
+                });
+                
+                // Remove room and its activity record
+                rooms.delete(roomId);
+                roomActivity.delete(roomId);
+                cleanedRooms++;
+            }
+        }
+    });
+    
+    if (cleanedRooms > 0) {
+        console.log(`Cleaned up ${cleanedRooms} inactive rooms`);
+    }
+}, ROOM_CLEANUP_INTERVAL);
+
 // Create a more efficient ping system with separate ping handling logic
 const pingIntervalId = setInterval(() => {
   let totalPings = 0;
@@ -85,40 +138,125 @@ const pingIntervalId = setInterval(() => {
   }
 }, PING_INTERVAL);
 
-// Helper function to handle disconnection
-function handleDisconnection(ws) {
-  const { userId, roomId } = ws;
-  if (roomId && userId) {
-    // Mark user as temporarily disconnected but don't remove yet
+// Add host transfer mechanism
+function transferHostRole(roomId, oldHostId, newHostId) {
     const room = rooms.get(roomId);
-    if (room) {
-      const user = room.get(userId);
-      if (user) {
-        user.connected = false;
-        user.disconnectedAt = Date.now();
-        
-        // Notify others about temporary disconnection
-        broadcastToRoom(roomId, {
-          type: 'user-disconnected',
-          userId: userId,
-          userName: user.userName,
-          temporary: true
-        }, userId);
-        
-        // Schedule final removal if not reconnected within 30 seconds
-        setTimeout(() => {
-          const currentRoom = rooms.get(roomId);
-          if (currentRoom) {
-            const currentUser = currentRoom.get(userId);
-            if (currentUser && !currentUser.connected) {
-              // User didn't reconnect, remove permanently
-              removeUserFromRoom(userId, roomId);
+    if (!room) return false;
+
+    const oldHost = room.get(oldHostId);
+    const newHost = room.get(newHostId);
+    
+    if (!oldHost || !newHost) return false;
+
+    // Update host status
+    oldHost.isHost = false;
+    newHost.isHost = true;
+
+    // Update session data
+    const oldHostSession = userSessions.get(oldHostId);
+    const newHostSession = userSessions.get(newHostId);
+    
+    if (oldHostSession) oldHostSession.isHost = false;
+    if (newHostSession) newHostSession.isHost = true;
+
+    return true;
+}
+
+// Add function to find the best candidate for new host
+function findNewHostCandidate(room, excludeUserId) {
+    // Sort users by connection time (oldest first) and connection status
+    const candidates = Array.from(room.entries())
+        .filter(([userId, user]) => userId !== excludeUserId)
+        .sort((a, b) => {
+            // Prioritize connected users
+            if (a[1].connected && !b[1].connected) return -1;
+            if (!a[1].connected && b[1].connected) return 1;
+            // Then sort by join time
+            return a[1].joinedAt - b[1].joinedAt;
+        });
+
+    return candidates.length > 0 ? candidates[0][0] : null;
+}
+
+// Update handleDisconnection function to handle host disconnection better
+function handleDisconnection(ws) {
+    const { userId, roomId } = ws;
+    if (!roomId || !userId) return;
+
+    const room = rooms.get(roomId);
+    if (!room) return;
+
+    const user = room.get(userId);
+    if (!user) return;
+
+    const wasHost = user.isHost;
+    user.connected = false;
+    user.disconnectedAt = Date.now();
+
+    // Notify others about temporary disconnection
+    broadcastToRoom(roomId, {
+        type: 'user-disconnected',
+        userId: userId,
+        userName: user.userName,
+        temporary: true,
+        wasHost: wasHost
+    }, userId);
+
+    // If the disconnected user was the host, immediately try to find a new host
+    if (wasHost) {
+        const newHostId = findNewHostCandidate(room, userId);
+        if (newHostId) {
+            if (transferHostRole(roomId, userId, newHostId)) {
+                const newHost = room.get(newHostId);
+                broadcastToRoom(roomId, {
+                    type: 'host-changed',
+                    oldHostId: userId,
+                    newHostId: newHostId,
+                    newHostName: newHost.userName
+                });
+                console.log(`Host role transferred from ${userId} to ${newHostId} in room ${roomId}`);
             }
-          }
-        }, 30000); // 30 seconds to reconnect
-      }
+        }
     }
-  }
+
+    // Set a shorter timeout for host reconnection
+    const timeoutDuration = wasHost ? 15000 : 30000; // 15 seconds for host, 30 for others
+
+    setTimeout(() => {
+        const currentRoom = rooms.get(roomId);
+        if (!currentRoom) return;
+
+        const currentUser = currentRoom.get(userId);
+        if (currentUser && !currentUser.connected) {
+            // User didn't reconnect, remove permanently
+            removeUserFromRoom(userId, roomId);
+            
+            // If this was the host and no transfer happened yet, try again
+            if (wasHost) {
+                const newHostId = findNewHostCandidate(currentRoom, userId);
+                if (newHostId) {
+                    if (transferHostRole(roomId, userId, newHostId)) {
+                        const newHost = currentRoom.get(newHostId);
+                        broadcastToRoom(roomId, {
+                            type: 'host-changed',
+                            oldHostId: userId,
+                            newHostId: newHostId,
+                            newHostName: newHost.userName,
+                            permanent: true
+                        });
+                    }
+                } else {
+                    // No suitable host found, close the room
+                    broadcastToRoom(roomId, {
+                        type: 'room-closed',
+                        roomId: roomId,
+                        reason: 'No active participants to transfer host role'
+                    });
+                    rooms.delete(roomId);
+                }
+            }
+        }
+    }, timeoutDuration);
 }
 
 // Helper function to remove user from room
@@ -139,31 +277,28 @@ function removeUserFromRoom(userId, roomId) {
     // Clear any cached data for this user or room
     clearRoomCache(roomId);
     
-    // Notify others in room
-    broadcastToRoom(roomId, {
-      type: 'user-left',
-      userId: userId,
-      userName: userName
-    });
+    // Validate room after user removal
+    const isRoomValid = validateRoom(roomId);
     
-    // If host left, assign a new host or close the room
-    if (isHost && room.size > 0) {
-      // Assign the first remaining user as host
-      const [newHostId, newHost] = Array.from(room.entries())[0];
-      newHost.isHost = true;
-      
-      // Notify about new host
-      broadcastToRoom(roomId, {
-        type: 'new-host',
-        userId: newHostId,
-        userName: newHost.userName
-      });
-    }
-    
-    // Clean up empty rooms
-    if (room.size === 0) {
-      rooms.delete(roomId);
-      console.log(`Room ${roomId} deleted (empty)`);
+    if (isRoomValid) {
+        // Only broadcast if room still exists and has users
+        broadcastToRoom(roomId, {
+            type: 'user-left',
+            userId: userId,
+            userName: userName
+        });
+        
+        // Handle host transfer if needed
+        if (isHost && room.size > 0) {
+            const [newHostId, newHost] = Array.from(room.entries())[0];
+            newHost.isHost = true;
+            
+            broadcastToRoom(roomId, {
+                type: 'new-host',
+                userId: newHostId,
+                userName: newHost.userName
+            });
+        }
     }
   }
 }
@@ -172,6 +307,9 @@ function removeUserFromRoom(userId, roomId) {
 function broadcastToRoom(roomId, message, excludeUserId = null) {
   const room = rooms.get(roomId);
   if (!room) return 0;
+  
+  // Update room activity on broadcast
+  updateRoomActivity(roomId);
   
   // Check if we can use a cached participant list
   let cachedReceivers = roomCache.get(`${roomId}-receivers-${excludeUserId || 'none'}`);
@@ -315,6 +453,9 @@ function handleJoin(ws, data) {
     isHost: shouldBeHost
   });
   
+  // Update room activity
+  updateRoomActivity(roomId);
+  
   console.log(`User ${userName} (${userId}) joined room ${roomId} as ${shouldBeHost ? 'host' : 'participant'}`);
   
   // Notify others in room
@@ -342,99 +483,75 @@ function handleJoin(ws, data) {
   }));
 }
 
-// Handler for reconnection attempts
+// Update handleReconnect to handle host reconnection
 function handleReconnect(ws, data) {
-  const { userId, roomId, userName } = data;
-  
-  if (!userId || !roomId) {
-    return sendError(ws, 'missing-parameters', 'Missing required parameters for reconnection');
-  }
-  
-  // Check if room exists
-  if (!rooms.has(roomId)) {
-    return sendError(ws, 'room-not-found', 'The room no longer exists');
-  }
-  
-  // Check if user session exists
-  const session = userSessions.get(userId);
-  if (!session) {
-    return sendError(ws, 'session-expired', 'Your session has expired, please rejoin');
-  }
-  
-  // Update connection info
-  ws.userId = userId;
-  ws.roomId = roomId;
-  
-  const room = rooms.get(roomId);
-  const existingUser = room.get(userId);
-  
-  if (existingUser) {
-    // Update user's connection
-    existingUser.ws = ws;
-    existingUser.connected = true;
-    existingUser.disconnectedAt = null;
+    const { userId, roomId, userName } = data;
     
-    console.log(`User ${userName} (${userId}) reconnected to room ${roomId}`);
+    if (!userId || !roomId) {
+        return sendError(ws, 'missing-parameters', 'Missing required parameters for reconnection');
+    }
     
-    // Notify others about reconnection
-    broadcastToRoom(roomId, {
-      type: 'user-reconnected',
-      userId: userId,
-      userName: userName
-    }, userId);
+    // Check if room exists
+    if (!rooms.has(roomId)) {
+        return sendError(ws, 'room-not-found', 'The room no longer exists');
+    }
     
-    // Send current participants to reconnected user
-    const participants = Array.from(room.entries())
-      .filter(([id]) => id !== userId)
-      .map(([id, user]) => ({
-        userId: id,
-        userName: user.userName,
-        isHost: user.isHost
-      }));
+    // Check if user session exists
+    const session = userSessions.get(userId);
+    if (!session) {
+        return sendError(ws, 'session-expired', 'Your session has expired, please rejoin');
+    }
     
-    ws.send(JSON.stringify({
-      type: 'room-rejoined',
-      roomId,
-      participants,
-      isHost: existingUser.isHost
-    }));
-  } else {
-    // User exists in session but not in room (rare case)
-    // Add them back to the room
-    room.set(userId, {
-      ws,
-      userName: session.userName,
-      isHost: session.isHost,
-      connected: true,
-      joinedAt: Date.now()
-    });
+    // Update connection info
+    ws.userId = userId;
+    ws.roomId = roomId;
     
-    console.log(`User ${session.userName} (${userId}) re-added to room ${roomId}`);
+    const room = rooms.get(roomId);
+    const existingUser = room.get(userId);
     
-    // Notify others in room
-    broadcastToRoom(roomId, {
-      type: 'user-joined',
-      userId: userId,
-      userName: session.userName,
-      isHost: session.isHost
-    }, userId);
-    
-    // Send list of existing participants
-    const participants = Array.from(room.entries())
-      .filter(([id]) => id !== userId)
-      .map(([id, user]) => ({
-        userId: id,
-        userName: user.userName,
-        isHost: user.isHost
-      }));
-    
-    ws.send(JSON.stringify({
-      type: 'room-rejoined',
-      roomId,
-      participants,
-      isHost: session.isHost
-    }));
-  }
+    if (existingUser) {
+        const wasHost = existingUser.isHost;
+        // Update user's connection
+        existingUser.ws = ws;
+        existingUser.connected = true;
+        existingUser.disconnectedAt = null;
+        
+        console.log(`User ${userName} (${userId}) reconnected to room ${roomId}`);
+        
+        // If this user was previously the host, check if the role was transferred
+        if (session.isHost && !existingUser.isHost) {
+            // Notify the reconnected user that they are no longer the host
+            ws.send(JSON.stringify({
+                type: 'host-status-changed',
+                isHost: false,
+                message: 'Host role was transferred during your disconnection'
+            }));
+        }
+        
+        // Notify others about reconnection
+        broadcastToRoom(roomId, {
+            type: 'user-reconnected',
+            userId: userId,
+            userName: userName,
+            wasHost: wasHost
+        }, userId);
+        
+        // Send current participants to reconnected user
+        const participants = Array.from(room.entries())
+            .filter(([id]) => id !== userId)
+            .map(([id, user]) => ({
+                userId: id,
+                userName: user.userName,
+                isHost: user.isHost
+            }));
+        
+        ws.send(JSON.stringify({
+            type: 'room-rejoined',
+            roomId,
+            participants,
+            isHost: existingUser.isHost
+        }));
+    }
 }
 
 // Handler for signaling messages (offer, answer, ice-candidate)
@@ -463,6 +580,9 @@ function handleSignaling(ws, data) {
   const senderUser = room.get(userId);
   data.senderId = userId;
   data.senderName = senderUser ? senderUser.userName : null;
+  
+  // Update room activity on any signaling
+  updateRoomActivity(roomId);
   
   // Forward the message to the target user - pre-stringify for performance
   try {
@@ -528,9 +648,12 @@ function handleCloseRoom(ws, data) {
     hostName: userName
   });
   
-  // Clear all user sessions for this room
-  room.forEach((user, id) => {
-    userSessions.delete(id);
+  // Terminate all WebSocket connections in the room
+  room.forEach((participant, participantId) => {
+    if (participant.ws && participant.ws.readyState === WebSocket.OPEN) {
+      participant.ws.terminate();
+    }
+    userSessions.delete(participantId);
   });
   
   // Delete the room
@@ -540,6 +663,9 @@ function handleCloseRoom(ws, data) {
   ws.send(JSON.stringify({
     type: 'room-close-confirmed'
   }));
+  
+  // Finally terminate the host's connection
+  ws.terminate();
 }
 
 // Handler for chat messages
@@ -624,8 +750,9 @@ server.listen(PORT, () => {
 process.on('SIGINT', () => {
   console.log('Shutting down server...');
   
-  // Clear the ping interval
+  // Clear all intervals
   clearInterval(pingIntervalId);
+  clearInterval(roomCleanupInterval);
   
   // Notify all clients about server shutdown
   const shutdownMessage = JSON.stringify({
@@ -648,4 +775,29 @@ process.on('SIGINT', () => {
       process.exit(0);
     });
   });
-}); 
+});
+
+// Add validation to prevent zombie room creation
+function validateRoom(roomId) {
+    const room = rooms.get(roomId);
+    if (!room) return false;
+    
+    // Remove any users with closed connections
+    for (const [userId, user] of room.entries()) {
+        if (!user.connected || user.ws.readyState !== WebSocket.OPEN) {
+            console.log(`Removing disconnected user ${userId} from room ${roomId}`);
+            room.delete(userId);
+            userSessions.delete(userId);
+        }
+    }
+    
+    // If room is empty after cleanup, delete it
+    if (room.size === 0) {
+        console.log(`Deleting empty room ${roomId} after validation`);
+        rooms.delete(roomId);
+        roomActivity.delete(roomId);
+        return false;
+    }
+    
+    return true;
+} 
