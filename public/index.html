@@ -1861,7 +1861,7 @@
         }
 
         .notification {
-            position: relative;
+            position: fixed;
             background: rgba(32, 33, 36, 0.95);
             backdrop-filter: blur(8px);
             border-radius: 8px;
@@ -1875,8 +1875,11 @@
             transform: translateY(-20px);
             transition: all 0.3s ease-out;
             pointer-events: auto;
-            width: 100%;
+            width: 90%;
+            left: 50%;
+            transform: translateX(-50%);
             box-sizing: border-box;
+            z-index: 9999;
         }
 
         .notification.visible {
@@ -1937,12 +1940,21 @@
         @media (max-width: 768px) {
             #notification-container {
                 top: 10px;
+                left: 0;
+                right: 0;   
                 width: calc(100% - 20px);
+                padding-left: 10px;
+                padding-right: 10px;
+                box-sizing: border-box;
             }
 
             .notification {
+                width: 100%;
+                max-width: none;
+                margin: 0 auto;
                 padding: 10px 12px;
                 font-size: 13px;
+                box-sizing: border-box;
             }
 
             .notification-icon {
