@@ -1847,14 +1847,66 @@
     </style>
 </head>
 <body>
-    <div id="setupScreen" class="join-screen screen screen-transition">
-        <h1 class="text-2xl font-medium mb-2">FastMeet</h1>
-        <form id="joinRoomForm" class="join-form">
-            <input type="text" id="roomIdInput" placeholder="Enter room ID or leave blank to create a new room" class="meet-input">
-            <input type="text" id="userNameInput" placeholder="Your name" required class="meet-input">
-            <button type="submit" class="join-button">Join meeting</button>
-            </form>
+    <div id="setupScreen" class="join-screen screen screen-transition flex flex-col items-center justify-start md:justify-center w-full max-w-md mx-auto p-6 md:p-8">
+        <!-- Logo -->
+        <div class="flex items-center gap-2 mb-6">
+            <span class="text-2xl md:text-3xl text-blue-500">⚡</span>
+            <h1 class="text-2xl font-medium mb-2">FastMeet</h1>
         </div>
+        
+        <!-- Form - preserved ID -->
+        <form id="joinRoomForm" class="join-form w-full bg-gray-800 rounded-xl shadow-lg p-6 relative">
+            <!-- Status indicator -->
+            <div class="absolute top-4 right-4 flex items-center gap-1 bg-green-900/20 text-green-500 px-2 py-1 rounded-full text-xs">
+                <span class="w-2 h-2 rounded-full bg-green-500"></span>
+                Live
+            </div>
+            
+            <!-- Input - preserved ID -->
+            <div class="mb-4">
+                <label for="roomIdInput" class="block mb-2 text-sm font-medium text-gray-400">Room ID</label>
+                <input 
+                    type="text" 
+                    id="roomIdInput" 
+                    placeholder="Enter room ID or leave blank to create a new room" 
+                    class="meet-input w-full px-4 py-3 bg-gray-700 border border-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 rounded-lg outline-none text-white"
+                >
+            </div>
+            
+            <!-- Input - preserved ID -->
+            <div class="mb-5">
+                <label for="userNameInput" class="block mb-2 text-sm font-medium text-gray-400">Your name</label>
+                <input 
+                    type="text" 
+                    id="userNameInput" 
+                    placeholder="Your name" 
+                    required 
+                    class="meet-input w-full px-4 py-3 bg-gray-700 border border-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 rounded-lg outline-none text-white"
+                >
+            </div>
+            
+            
+            <!-- Button - preserved class -->
+            <button 
+                type="submit" 
+                class="join-button w-full mt-5 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-all hover:scale-[1.01] focus:ring-2 focus:ring-blue-500/50 focus:outline-none active:scale-[0.98]"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M15 10l5 5-5 5"></path>
+                    <path d="M4 4v7a4 4 0 0 0 4 4h12"></path>
+                </svg>
+                Join meeting
+            </button>
+        </form>
+
+        
+        <!-- Footer -->
+        <div class="mt-8 md:mt-12 text-gray-500 text-xs text-center">
+            © 2025 FastMeet • 
+            <a href="#" class="px-1 hover:text-gray-400">Privacy</a> • 
+            <a href="#" class="px-1 hover:text-gray-400">Terms</a>
+        </div>
+    </div>
 
     <div id="conferenceScreen" class="screen screen-transition fade-scale" style="display: none;">
         <div class="meet-info">
