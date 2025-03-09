@@ -1844,9 +1844,124 @@
         .remote-camera-overlay.camera-disabled::after {
             opacity: 1 !important;
         }
+
+        /* Notification Manager Styles */
+        #notification-container {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9999;
+            width: 90%;
+            max-width: 400px;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .notification {
+            position: relative;
+            background: rgba(32, 33, 36, 0.95);
+            backdrop-filter: blur(8px);
+            border-radius: 8px;
+            padding: 12px 16px;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            opacity: 0;
+            transform: translateY(-20px);
+            transition: all 0.3s ease-out;
+            pointer-events: auto;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .notification.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .notification-icon {
+            flex-shrink: 0;
+            width: 20px;
+            height: 20px;
+        }
+
+        .notification-content {
+            flex-grow: 1;
+            font-size: 14px;
+            line-height: 1.4;
+            margin-right: 8px;
+            word-break: break-word;
+        }
+
+        .notification-close {
+            flex-shrink: 0;
+            width: 20px;
+            height: 20px;
+            border: none;
+            background: transparent;
+            color: rgba(255, 255, 255, 0.6);
+            cursor: pointer;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: color 0.2s ease;
+        }
+
+        .notification-close:hover {
+            color: #fff;
+        }
+
+        .notification.info {
+            border-left: 4px solid #4285f4;
+        }
+
+        .notification.success {
+            border-left: 4px solid #34a853;
+        }
+
+        .notification.warning {
+            border-left: 4px solid #fbbc05;
+        }
+
+        .notification.error {
+            border-left: 4px solid #ea4335;
+        }
+
+        /* Mobile optimizations */
+        @media (max-width: 768px) {
+            #notification-container {
+                top: 10px;
+                width: calc(100% - 20px);
+            }
+
+            .notification {
+                padding: 10px 12px;
+                font-size: 13px;
+            }
+
+            .notification-icon {
+                width: 16px;
+                height: 16px;
+            }
+        }
+
+        /* Safe area insets for modern mobile devices */
+        @supports (padding-top: env(safe-area-inset-top)) {
+            #notification-container {
+                padding-top: env(safe-area-inset-top);
+            }
+        }
     </style>
 </head>
 <body>
+    <!-- Add notification container at the top of body -->
+    <div id="notification-container"></div>
     <div id="setupScreen" class="join-screen screen screen-transition flex flex-col items-center justify-start md:justify-center w-full max-w-md mx-auto p-6 md:p-8">
         <!-- Logo -->
         <div class="flex items-center gap-2 mb-6">
@@ -1854,7 +1969,6 @@
             <h1 class="text-2xl font-medium mb-2">FastMeet</h1>
         </div>
         
-        <!-- Form - preserved ID -->
         <form id="joinRoomForm" class="join-form w-full bg-gray-800 rounded-xl shadow-lg p-6 relative">
             <!-- Status indicator -->
             <div class="absolute top-4 right-4 flex items-center gap-1 bg-green-900/20 text-green-500 px-2 py-1 rounded-full text-xs">
@@ -1862,7 +1976,6 @@
                 Live
             </div>
             
-            <!-- Input - preserved ID -->
             <div class="mb-4">
                 <label for="roomIdInput" class="block mb-2 text-sm font-medium text-gray-400">Room ID</label>
                 <input 
@@ -1873,7 +1986,6 @@
                 >
             </div>
             
-            <!-- Input - preserved ID -->
             <div class="mb-5">
                 <label for="userNameInput" class="block mb-2 text-sm font-medium text-gray-400">Your name</label>
                 <input 
@@ -1885,8 +1997,6 @@
                 >
             </div>
             
-            
-            <!-- Button - preserved class -->
             <button 
                 type="submit" 
                 class="join-button w-full mt-5 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-all hover:scale-[1.01] focus:ring-2 focus:ring-blue-500/50 focus:outline-none active:scale-[0.98]"
@@ -6695,6 +6805,134 @@
             // Also call setup when joining a room
             window.addEventListener('roomJoined', setupTouchHandlers);
         });
+
+        // Notification Manager
+        const NotificationManager = {
+            container: null,
+            activeNotifications: new Set(),
+            queue: [],
+            maxNotifications: 3,
+            
+            init() {
+                this.container = document.getElementById('notification-container');
+                if (!this.container) {
+                    this.container = document.createElement('div');
+                    this.container.id = 'notification-container';
+                    document.body.insertBefore(this.container, document.body.firstChild);
+                }
+            },
+            
+            show(message, type = 'info', duration = 5000) {
+                // Check for duplicates
+                const notificationKey = `${message}-${type}`;
+                if (this.activeNotifications.has(notificationKey)) {
+                    return; // Skip duplicate notification
+                }
+                
+                // Create notification element
+                const notification = document.createElement('div');
+                notification.className = `notification ${type}`;
+                
+                // Add icon based on type
+                const iconSvg = this.getIconForType(type);
+                
+                notification.innerHTML = `
+                    <div class="notification-icon">${iconSvg}</div>
+                    <div class="notification-content">${message}</div>
+                    <button class="notification-close" aria-label="Close notification">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M18 6L6 18M6 6l12 12"/>
+                        </svg>
+                    </button>
+                `;
+                
+                // Add to active notifications
+                this.activeNotifications.add(notificationKey);
+                
+                // Handle close button
+                const closeButton = notification.querySelector('.notification-close');
+                closeButton.addEventListener('click', () => {
+                    this.remove(notification, notificationKey);
+                });
+                
+                // Check if we need to queue
+                if (this.container.children.length >= this.maxNotifications) {
+                    this.queue.push({ notification, notificationKey, duration });
+                    return;
+                }
+                
+                this.addToContainer(notification, notificationKey, duration);
+            },
+            
+            addToContainer(notification, notificationKey, duration) {
+                this.container.appendChild(notification);
+                
+                // Trigger reflow for animation
+                notification.offsetHeight;
+                notification.classList.add('visible');
+                
+                // Auto remove after duration
+                if (duration > 0) {
+                    setTimeout(() => {
+                        this.remove(notification, notificationKey);
+                    }, duration);
+                }
+            },
+            
+            remove(notification, notificationKey) {
+                if (!notification.isConnected) return;
+                
+                notification.classList.remove('visible');
+                
+                notification.addEventListener('transitionend', () => {
+                    notification.remove();
+                    this.activeNotifications.delete(notificationKey);
+                    
+                    // Process queue
+                    if (this.queue.length > 0 && this.container.children.length < this.maxNotifications) {
+                        const next = this.queue.shift();
+                        this.addToContainer(next.notification, next.notificationKey, next.duration);
+                    }
+                }, { once: true });
+            },
+            
+            getIconForType(type) {
+                switch (type) {
+                    case 'success':
+                        return `<svg viewBox="0 0 24 24" fill="none" stroke="#34a853" stroke-width="2">
+                            <path d="M20 6L9 17l-5-5"/>
+                        </svg>`;
+                    case 'error':
+                        return `<svg viewBox="0 0 24 24" fill="none" stroke="#ea4335" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M15 9l-6 6M9 9l6 6"/>
+                        </svg>`;
+                    case 'warning':
+                        return `<svg viewBox="0 0 24 24" fill="none" stroke="#fbbc05" stroke-width="2">
+                            <path d="M12 9v4M12 16h.01"/>
+                            <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                        </svg>`;
+                    default: // info
+                        return `<svg viewBox="0 0 24 24" fill="none" stroke="#4285f4" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M12 16v-4M12 8h.01"/>
+                        </svg>`;
+                }
+            }
+        };
+
+        // Initialize notification manager
+        NotificationManager.init();
+
+        // Replace existing showNotification function
+        function showNotification(message, type = 'info', duration = 5000) {
+            NotificationManager.show(message, type, duration);
+        }
+
+        // Replace existing showParticipantNotification function
+        function showParticipantNotification(message, type = 'info', duration = 5000) {
+            NotificationManager.show(message, type, duration);
+        }
     </script>
 </body>
 </html>
