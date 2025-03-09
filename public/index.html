@@ -1652,6 +1652,148 @@
                 font-weight: bold;
             }
         }
+
+        /* Add these styles to your existing CSS */
+        .audio-control-group {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            position: relative;
+        }
+
+        .meet-select {
+            appearance: none;
+            background: rgba(32, 33, 36, 0.8);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            padding: 8px 32px 8px 12px;
+            font-size: 14px;
+            line-height: 20px;
+            cursor: pointer;
+            max-width: 240px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            transition: all 0.2s ease;
+        }
+
+        .meet-select:hover {
+            background: rgba(32, 33, 36, 0.9);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+
+        .meet-select:focus {
+            outline: none;
+            border-color: #8ab4f8;
+            box-shadow: 0 0 0 2px rgba(138, 180, 248, 0.2);
+        }
+
+        /* Custom select arrow */
+        .select-wrapper {
+            position: relative;
+            display: inline-block;
+        }
+
+        .select-wrapper::after {
+            content: '';
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 16px;
+            height: 16px;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='rgba(255, 255, 255, 0.8)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: center;
+            pointer-events: none;
+            transition: all 0.2s ease;
+            opacity: 0.8;
+        }
+
+        .select-wrapper:hover::after {
+            opacity: 1;
+            transform: translateY(-50%) translateY(1px);
+        }
+
+        .meet-select:focus + .select-wrapper::after {
+            opacity: 1;
+        }
+
+        /* Mobile optimizations */
+        @media (max-width: 768px) {
+            .meet-select {
+                max-width: 180px;
+                font-size: 13px;
+                padding: 6px 28px 6px 10px;
+            }
+
+            .audio-control-group {
+                gap: 2px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .meet-select {
+                max-width: 140px;
+                font-size: 12px;
+            }
+        }
+
+        /* Touch device optimizations */
+        @media (hover: none) {
+            .meet-select {
+                padding: 10px 32px 10px 12px; /* Larger touch target */
+            }
+        }
+
+        /* Loading state */
+        .meet-select.loading {
+            background-image: linear-gradient(90deg, 
+                rgba(32, 33, 36, 0.8) 25%, 
+                rgba(42, 43, 46, 0.8) 50%, 
+                rgba(32, 33, 36, 0.8) 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s infinite linear;
+        }
+
+        @keyframes loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+    
+        /* Mobile optimizations */
+        @media (max-width: 768px) {
+            .meet-select {
+                max-width: 180px;
+                font-size: 13px;
+                padding: 6px 32px 6px 10px;
+            }
+
+            .audio-control-group {
+                gap: 6px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .meet-select {
+                max-width: 140px;
+                font-size: 12px;
+            }
+        }
+
+        /* Touch device optimizations */
+        @media (hover: none) {
+            .meet-select {
+                padding: 10px 36px 10px 12px;
+            }
+            
+            .meet-select:active {
+                transform: scale(0.98);
+                transition: transform 0.1s ease;
+            }
+        }
     </style>
 </head>
 <body>
@@ -1689,14 +1831,21 @@
         </div>
 
         <div id="meetControls" class="fixed bottom-8 left-1/2 transform -translate-x-1/2 meet-controls flex items-center" style="z-index: 2000; display: flex !important;">
-            <button id="toggleAudio" class="meet-button" type="button" aria-label="Toggle microphone">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: block;">
+            <div class="audio-control-group">
+                <button id="toggleAudio" class="meet-button" type="button" aria-label="Toggle microphone">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: block;">
                         <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
                         <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
                         <line x1="12" y1="19" x2="12" y2="23"></line>
                         <line x1="8" y1="23" x2="16" y2="23"></line>
                     </svg>
-            </button>
+                </button>
+                <div class="select-wrapper">
+                    <select id="micSelect" class="meet-select" aria-label="Select microphone">
+                        <option value="">Loading microphones...</option>
+                    </select>
+                </div>
+            </div>
             <button id="toggleVideo" class="meet-button" type="button" aria-label="Toggle camera">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: block;">
                         <polygon points="23 7 16 12 23 17 23 7"></polygon>
@@ -1733,23 +1882,181 @@
             iceCandidatePoolSize: 10,
             bundlePolicy: 'max-bundle',
             rtcpMuxPolicy: 'require',
-            sdpSemantics: 'unified-plan'
+            sdpSemantics: 'unified-plan',
+            // Enable advanced options for low latency
+            enableDtlsSrtp: true,
+            enableRtpDataChannels: false,
+            // Optimize ICE gathering
+            iceServersTransportPolicy: 'all',
+            // Add codec preferences for more efficient video
+            codecPreferences: {
+                video: ['VP9', 'VP8', 'H264'],
+                audio: ['OPUS']
+            }
         };
 
-        // Media constraints optimized for low latency
+        // Optimized media constraints for low latency and high quality
         const mediaConstraints = {
             video: {
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
-                frameRate: { ideal: 30, max: 60 }
+                width: { ideal: 1280, max: 1920 },
+                height: { ideal: 720, max: 1080 },
+                frameRate: { min: 24, ideal: 30, max: 60 },
+                aspectRatio: { ideal: 16/9 },
+                // Low latency specific constraints
+                latency: { ideal: 0.01 },
+                // Advanced video constraints for better quality
+                advanced: [
+                    { width: { min: 640, ideal: 1280, max: 1920 } },
+                    { height: { min: 480, ideal: 720, max: 1080 } },
+                    { frameRate: { min: 24, ideal: 30, max: 60 } },
+                    { aspectRatio: { ideal: 16/9 } },
+                    // Reduce noise in dark environments (if supported)
+                    { noiseSuppression: true },
+                    // Automatic gain control (if supported)
+                    { autoGainControl: true }
+                ]
             },
             audio: {
+                // Audio constraints optimized for voice clarity and low latency
                 echoCancellation: true,
                 noiseSuppression: true,
                 autoGainControl: true,
-                latency: 0.01 // Request lowest possible latency
+                // High sampling rate for better audio quality
+                sampleRate: { ideal: 48000 },
+                sampleSize: { ideal: 16 },
+                channelCount: { ideal: 2 },
+                // Low latency audio processing
+                latency: { ideal: 0.01 },
+                // Advanced audio constraints
+                advanced: [
+                    { echoCancellation: { ideal: true } },
+                    { noiseSuppression: { ideal: true } },
+                    { autoGainControl: { ideal: true } }
+                ]
             }
         };
+
+        // Function to apply codec preferences during offer/answer creation
+        async function applyCodecPreferences(pc, offerOptions = {}) {
+            // Check if RTCRtpTransceiver is supported and has setCodecPreferences
+            if (!window.RTCRtpTransceiver || !RTCRtpTransceiver.prototype.setCodecPreferences) {
+                console.warn('Codec preferences not supported in this browser');
+                return pc.createOffer(offerOptions);
+            }
+
+            try {
+                // Get capabilities for video and audio
+                const videoCapabilities = RTCRtpSender.getCapabilities('video');
+                const audioCapabilities = RTCRtpSender.getCapabilities('audio');
+
+                if (!videoCapabilities && !audioCapabilities) {
+                    console.warn('No codec capabilities available');
+                    return pc.createOffer(offerOptions);
+                }
+
+                // Find transceivers for video and audio
+                const transceivers = pc.getTransceivers();
+                let audioTransceiverFound = false;
+                
+                // Debug info
+                console.log(`Applying codec preferences to ${transceivers.length} transceivers`);
+                
+                for (const transceiver of transceivers) {
+                    // Skip if stopped or not receiving
+                    if (transceiver.stopped || !transceiver.receiver) {
+                        console.log('Skipping stopped or non-receiving transceiver');
+                        continue;
+                    }
+                    
+                    const kind = transceiver.receiver.track?.kind;
+                    if (!kind) {
+                        console.log('Skipping transceiver with no kind');
+                        continue;
+                    }
+                    
+                    console.log(`Processing ${kind} transceiver`);
+                    
+                    if (kind === 'audio') {
+                        audioTransceiverFound = true;
+                    }
+                    
+                    const capabilities = kind === 'video' ? videoCapabilities : (kind === 'audio' ? audioCapabilities : null);
+                    const preferredCodecs = configuration.codecPreferences[kind];
+                    
+                    if (!capabilities || !preferredCodecs) {
+                        console.log(`No capabilities or preferred codecs for ${kind}`);
+                        continue;
+                    }
+                    
+                    // Reorder codecs based on preference
+                    const codecs = [];
+                    
+                    // First add the preferred codecs in order
+                    for (const codec of preferredCodecs) {
+                        const matchingCodecs = capabilities.codecs.filter(c => 
+                            c.mimeType.toLowerCase().includes(codec.toLowerCase()));
+                        codecs.push(...matchingCodecs);
+                    }
+                    
+                    // Then add any remaining codecs
+                    const remainingCodecs = capabilities.codecs.filter(c => 
+                        !codecs.some(preferred => preferred.mimeType === c.mimeType));
+                    codecs.push(...remainingCodecs);
+                    
+                    if (codecs.length > 0) {
+                        try {
+                            transceiver.setCodecPreferences(codecs);
+                            console.log(`Set codec preferences for ${kind}: ${codecs.map(c => c.mimeType).join(', ')}`);
+                        } catch (e) {
+                            console.warn(`Failed to set codec preferences for ${kind}:`, e);
+                        }
+                    } else {
+                        console.warn(`No codecs available for ${kind}`);
+                    }
+                }
+                
+                // Ensure audio transceiver exists if we have audio tracks
+                if (!audioTransceiverFound && localStream && localStream.getAudioTracks().length > 0) {
+                    console.log('No audio transceiver found, but audio track exists. Adding audio transceiver.');
+                    // Ensure we have an audio transceiver
+                    const audioTransceiver = pc.addTransceiver('audio', {
+                        direction: 'sendrecv',
+                        streams: [localStream]
+                    });
+                    
+                    // Apply audio codec preferences if available
+                    if (audioCapabilities && configuration.codecPreferences.audio) {
+                        try {
+                            const codecs = [];
+                            for (const codec of configuration.codecPreferences.audio) {
+                                const matchingCodecs = audioCapabilities.codecs.filter(c => 
+                                    c.mimeType.toLowerCase().includes(codec.toLowerCase()));
+                                codecs.push(...matchingCodecs);
+                            }
+                            
+                            const remainingCodecs = audioCapabilities.codecs.filter(c => 
+                                !codecs.some(preferred => preferred.mimeType === c.mimeType));
+                            codecs.push(...remainingCodecs);
+                            
+                            if (codecs.length > 0) {
+                                audioTransceiver.setCodecPreferences(codecs);
+                                console.log(`Set codec preferences for newly added audio transceiver: ${codecs.map(c => c.mimeType).join(', ')}`);
+                            }
+                        } catch (e) {
+                            console.warn('Failed to set codec preferences for newly added audio transceiver:', e);
+                        }
+                    }
+                }
+                
+                // Create offer with the updated codec preferences
+                // Make sure to explicitly request audio in the offer
+                const updatedOfferOptions = { ...offerOptions, offerToReceiveAudio: true, offerToReceiveVideo: true };
+                return pc.createOffer(updatedOfferOptions);
+            } catch (error) {
+                console.error('Error applying codec preferences:', error);
+                return pc.createOffer({ ...offerOptions, offerToReceiveAudio: true, offerToReceiveVideo: true });
+            }
+        }
 
         // Variables to track state
         let localStream;
@@ -1759,6 +2066,7 @@
         let currentRoom;
         let statsInterval;
         let isScreenSharing = false;
+        let currentMicrophoneId = null;
         
         // DOM elements
         const setupScreen = document.getElementById('setupScreen');
@@ -1776,6 +2084,7 @@
         const leaveCallButton = document.getElementById('leaveCall');
         const statusText = document.getElementById('statusText');
         let localStats = document.getElementById('localStats');
+        const micSelect = document.getElementById('micSelect');
 
         // WebSocket-based signaling implementation
         class WebSocketSignaling {
@@ -2191,6 +2500,27 @@
                 this.reconnectAttempts = 0;
                 this.connectionState = 'disconnected';
             }
+
+            // Add broadcast method
+            broadcast(message) {
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    // Use the message type that server accepts
+                    const messageToSend = {
+                        type: 'message',  // Server accepts this type
+                        roomId: this.roomId,
+                        userId: this.userId,
+                        userName: this.userName,
+                        message: {
+                            type: 'media-update',
+                            ...message
+                        }
+                    };
+                    this.ws.send(JSON.stringify(messageToSend));
+                } else {
+                    console.warn('WebSocket not ready, message queued:', message);
+                    this.pendingMessages.push(message);
+                }
+            }
         }
 
         // Function to ensure clean join process
@@ -2265,6 +2595,19 @@
                 localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
                 await applyLowLatencySettings(localStream);
                 
+                // Initialize audio devices list after getting permissions
+                await updateAudioDevices();
+                
+                // Store the initial microphone ID
+                const audioTrack = localStream.getAudioTracks()[0];
+                if (audioTrack) {
+                    const settings = audioTrack.getSettings();
+                    currentMicrophoneId = settings.deviceId;
+                    if (micSelect) {
+                        micSelect.value = currentMicrophoneId;
+                    }
+                }
+                
                 // Handle localVideo reference
                 // First try to get the current element if it exists
                 const localVideoElement = document.getElementById('localVideo');
@@ -2320,12 +2663,42 @@
 
         // Apply low latency encoding settings to the stream
         async function applyLowLatencySettings(stream) {
+            // Check and log audio tracks
+            const audioTracks = stream.getAudioTracks();
+            console.log(`Audio tracks available: ${audioTracks.length}`);
+            
+            if (audioTracks.length > 0) {
+                const audioTrack = audioTracks[0];
+                console.log('Audio track found:', audioTrack.label, 'enabled:', audioTrack.enabled);
+                
+                // Ensure audio track is enabled
+                if (!audioTrack.enabled) {
+                    console.log('Enabling audio track');
+                    audioTrack.enabled = true;
+                }
+                
+                // Log audio constraints
+                if (typeof audioTrack.getConstraints === 'function') {
+                    const audioConstraints = audioTrack.getConstraints();
+                    console.log('Current audio constraints:', audioConstraints);
+                }
+                
+                // Log audio settings
+                if (typeof audioTrack.getSettings === 'function') {
+                    const audioSettings = audioTrack.getSettings();
+                    console.log('Current audio settings:', audioSettings);
+                }
+            } else {
+                console.warn('No audio tracks found in the stream');
+            }
+            
+            // Process video settings as before
             const videoTrack = stream.getVideoTracks()[0];
             
             if (videoTrack && typeof videoTrack.getConstraints === 'function') {
                 // Log current video settings
-                    const settings = videoTrack.getSettings();
-                    console.log('Current video settings:', settings);
+                const settings = videoTrack.getSettings();
+                console.log('Current video settings:', settings);
                 
                 // Try to set encoding parameters if supported
                 if (RTCRtpSender.getCapabilities && RTCRtpSender.getCapabilities('video')) {
@@ -2418,10 +2791,48 @@
         // Toggle audio
         function toggleAudio() {
             if (localStream) {
-                const audioTrack = localStream.getAudioTracks()[0];
-                if (audioTrack) {
-                    audioTrack.enabled = !audioTrack.enabled;
+                const audioTracks = localStream.getAudioTracks();
+                console.log(`Toggling audio. Found ${audioTracks.length} audio tracks`);
+                
+                if (audioTracks.length > 0) {
+                    const audioTrack = audioTracks[0];
+                    const currentState = audioTrack.enabled;
+                    audioTrack.enabled = !currentState;
+                    console.log(`Audio track '${audioTrack.label}' toggled from ${currentState} to ${audioTrack.enabled}`);
+                    
+                    // Update UI
                     toggleAudioButton.classList.toggle('active');
+                    
+                    // Notify peers of audio state change if signaling is available
+                    if (window.signaling && window.signaling.broadcast) {
+                        const message = {
+                            kind: 'audio',
+                            enabled: audioTrack.enabled,
+                            userId: window.signaling.userId
+                        };
+                        window.signaling.broadcast(message);
+                    }
+                    
+                    // When muted, add a visual indicator
+                    const localVideoContainer = document.querySelector('.video-wrapper.local');
+                    if (localVideoContainer) {
+                        if (!audioTrack.enabled) {
+                            // Add muted indicator if not present
+                            if (!document.getElementById('local-muted-indicator')) {
+                                const muteIndicator = document.createElement('div');
+                                muteIndicator.id = 'local-muted-indicator';
+                                muteIndicator.className = 'muted-indicator';
+                                muteIndicator.innerHTML = '<i class="fas fa-microphone-slash"></i>';
+                                localVideoContainer.appendChild(muteIndicator);
+                            }
+                        } else {
+                            // Remove muted indicator if present
+                            const muteIndicator = document.getElementById('local-muted-indicator');
+                            if (muteIndicator) {
+                                muteIndicator.remove();
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -3522,8 +3933,8 @@
                     pc.isNegotiating = true;
                     console.log(`Starting negotiation with ${userName}`);
                     
-                    // Create offer
-                    const offer = await pc.createOffer();
+                    // Use applyCodecPreferences instead of direct createOffer
+                    const offer = await applyCodecPreferences(pc);
                     
                     // Verify signaling state before setting local description
                     if (pc.signalingState !== 'stable') {
@@ -3547,9 +3958,10 @@
                         if (error.name === 'InvalidAccessError' && error.message.includes('m-lines')) {
                             console.warn(`M-line order issue detected with ${userName}, attempting recovery`);
                             
-                            // Try creating a new offer with default options
+                            // Try creating a new offer with default options, but still using codec preferences
                             try {
-                                const newOffer = await pc.createOffer({offerToReceiveAudio: true, offerToReceiveVideo: true});
+                                const offerOptions = {offerToReceiveAudio: true, offerToReceiveVideo: true};
+                                const newOffer = await applyCodecPreferences(pc, offerOptions);
                                 await pc.setLocalDescription(newOffer);
                                 window.signaling.sendOffer(userId, pc.localDescription);
                             } catch (recoveryError) {
@@ -3581,7 +3993,98 @@
                     
                     // Create and send answer
                     console.log(`Creating answer for ${userName}`);
-                    const answer = await pc.createAnswer();
+                    
+                    // First apply codec preferences to the transceivers
+                    try {
+                        // Get capabilities for video and audio
+                        const videoCapabilities = RTCRtpSender.getCapabilities('video');
+                        const audioCapabilities = RTCRtpSender.getCapabilities('audio');
+                        
+                        if (videoCapabilities || audioCapabilities) {
+                            const transceivers = pc.getTransceivers();
+                            let audioTransceiverFound = false;
+                            
+                            console.log(`Processing ${transceivers.length} transceivers for answer`);
+                            
+                            for (const transceiver of transceivers) {
+                                if (transceiver.stopped || !transceiver.receiver) continue;
+                                
+                                const kind = transceiver.receiver.track?.kind;
+                                if (!kind) continue;
+                                
+                                if (kind === 'audio') {
+                                    audioTransceiverFound = true;
+                                    // Explicitly set direction to sendrecv for audio
+                                    transceiver.direction = 'sendrecv';
+                                }
+                                
+                                const capabilities = kind === 'video' ? videoCapabilities : (kind === 'audio' ? audioCapabilities : null);
+                                const preferredCodecs = configuration.codecPreferences[kind];
+                                
+                                if (!capabilities || !preferredCodecs) continue;
+                                
+                                // Reorder codecs based on preference
+                                const codecs = [];
+                                
+                                // First add the preferred codecs in order
+                                for (const codec of preferredCodecs) {
+                                    const matchingCodecs = capabilities.codecs.filter(c => 
+                                        c.mimeType.toLowerCase().includes(codec.toLowerCase()));
+                                    codecs.push(...matchingCodecs);
+                                }
+                                
+                                // Then add any remaining codecs
+                                const remainingCodecs = capabilities.codecs.filter(c => 
+                                    !codecs.some(preferred => preferred.mimeType === c.mimeType));
+                                codecs.push(...remainingCodecs);
+                                
+                                if (codecs.length > 0) {
+                                    try {
+                                        transceiver.setCodecPreferences(codecs);
+                                        console.log(`Set codec preferences for ${kind} in answer: ${codecs.map(c => c.mimeType).join(', ')}`);
+                                    } catch (e) {
+                                        console.warn(`Failed to set codec preferences for ${kind} in answer:`, e);
+                                    }
+                                }
+                            }
+                            
+                            // Ensure audio transceiver exists
+                            if (!audioTransceiverFound && localStream && localStream.getAudioTracks().length > 0) {
+                                console.log('Adding audio transceiver for answer');
+                                const audioTransceiver = pc.addTransceiver('audio', {
+                                    direction: 'sendrecv',
+                                    streams: [localStream]
+                                });
+                                
+                                if (audioCapabilities && configuration.codecPreferences.audio) {
+                                    try {
+                                        const codecs = [];
+                                        for (const codec of configuration.codecPreferences.audio) {
+                                            const matchingCodecs = audioCapabilities.codecs.filter(c => 
+                                                c.mimeType.toLowerCase().includes(codec.toLowerCase()));
+                                            codecs.push(...matchingCodecs);
+                                        }
+                                        
+                                        const remainingCodecs = audioCapabilities.codecs.filter(c => 
+                                            !codecs.some(preferred => preferred.mimeType === c.mimeType));
+                                        codecs.push(...remainingCodecs);
+                                        
+                                        if (codecs.length > 0) {
+                                            audioTransceiver.setCodecPreferences(codecs);
+                                        }
+                                    } catch (e) {
+                                        console.warn('Failed to set codec preferences for audio in answer:', e);
+                                    }
+                                }
+                            }
+                        }
+                    } catch (error) {
+                        console.warn('Error applying codec preferences to answer:', error);
+                    }
+                    
+                    // Now create the answer with audio explicitly requested
+                    const answer = await pc.createAnswer({offerToReceiveAudio: true, offerToReceiveVideo: true});
+                    
                     await pc.setLocalDescription(answer);
                     
                     window.signaling.sendAnswer(userId, pc.localDescription);
@@ -4597,7 +5100,236 @@
             } else {
                 htmlElement.classList.add('desktop');
             }
+
+            // Initialize audio devices if permissions are granted
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    // Stop the temporary stream
+                    stream.getTracks().forEach(track => track.stop());
+                    // Now that we have permissions, enumerate devices
+                    updateAudioDevices();
+                })
+                .catch(err => {
+                    console.warn('Could not get initial audio permissions:', err);
+                    micSelect.innerHTML = '<option value="">No access to microphones</option>';
+                });
         });
+
+        // Function to enumerate and populate available audio input devices
+        async function updateAudioDevices() {
+            try {
+                // Add loading state
+                micSelect.classList.add('loading');
+                
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const audioInputDevices = devices.filter(device => device.kind === 'audioinput');
+                
+                // Clear existing options
+                micSelect.innerHTML = '';
+                
+                if (audioInputDevices.length === 0) {
+                    const option = document.createElement('option');
+                    option.value = '';
+                    option.text = 'No microphones found';
+                    micSelect.appendChild(option);
+                    micSelect.disabled = true;
+                } else {
+                    // Add available microphones
+                    audioInputDevices.forEach(device => {
+                        const option = document.createElement('option');
+                        option.value = device.deviceId;
+                        option.text = device.label || `Microphone ${micSelect.options.length + 1}`;
+                        micSelect.appendChild(option);
+                    });
+                    
+                    micSelect.disabled = false;
+                    
+                    // Select the current device if one is active
+                    if (currentMicrophoneId) {
+                        micSelect.value = currentMicrophoneId;
+                    }
+                    
+                    // If no microphone is selected but we have options, select the first one
+                    if (!micSelect.value && micSelect.options.length > 0) {
+                        micSelect.selectedIndex = 0;
+                        currentMicrophoneId = micSelect.value;
+                    }
+                }
+            } catch (error) {
+                console.error('Error enumerating audio devices:', error);
+                micSelect.innerHTML = '<option value="">Error loading microphones</option>';
+                micSelect.disabled = true;
+            } finally {
+                // Remove loading state
+                micSelect.classList.remove('loading');
+            }
+        }
+
+        // Function to switch microphone
+        async function switchMicrophone(deviceId) {
+            try {
+                // Get new audio stream with selected device
+                const newStream = await navigator.mediaDevices.getUserMedia({
+                    audio: { deviceId: { exact: deviceId } }
+                });
+                
+                const newAudioTrack = newStream.getAudioTracks()[0];
+                
+                if (newAudioTrack) {
+                    // Store the new device ID
+                    currentMicrophoneId = deviceId;
+                    
+                    if (localStream) {
+                        // Replace the audio track in the local stream
+                        const oldAudioTrack = localStream.getAudioTracks()[0];
+                        if (oldAudioTrack) {
+                            oldAudioTrack.stop();
+                            localStream.removeTrack(oldAudioTrack);
+                        }
+                        localStream.addTrack(newAudioTrack);
+                        
+                        // Replace the audio track in all peer connections
+                        Object.values(peerConnections).forEach(pc => {
+                            const senders = pc.getSenders();
+                            const audioSender = senders.find(sender => 
+                                sender.track && sender.track.kind === 'audio');
+                            
+                            if (audioSender) {
+                                audioSender.replaceTrack(newAudioTrack);
+                            } else {
+                                pc.addTrack(newAudioTrack, localStream);
+                            }
+                        });
+                        
+                        // Apply audio optimizations to the new track
+                        await newAudioTrack.applyConstraints({
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true,
+                            latency: { ideal: 0.01 }
+                        });
+                        
+                        console.log('Successfully switched microphone to:', newAudioTrack.label);
+                    }
+                }
+            } catch (error) {
+                console.error('Error switching microphone:', error);
+                showNotification('Failed to switch microphone. Please try again.', 'error');
+            }
+        }
+
+        // Add event listener for microphone selection
+        micSelect.addEventListener('change', () => {
+            const selectedDeviceId = micSelect.value;
+            if (selectedDeviceId) {
+                switchMicrophone(selectedDeviceId);
+            }
+        });
+
+        // Listen for device changes
+        navigator.mediaDevices.addEventListener('devicechange', () => {
+            updateAudioDevices();
+        });
+
+        // Update the joinRoom function to initialize microphone devices
+        async function joinRoom() {
+            event.preventDefault();
+            
+            // Ensure clean join process
+            cleanJoinProcess();
+            
+            userName = userNameInput.value.trim();
+            if (!userName) {
+                alert('Please enter your name');
+                return;
+            }
+
+            // Initialize WebSocket signaling
+            const signaling = new WebSocketSignaling(userName);
+            
+            // Get room ID or generate a new one
+            roomId = roomIdInput.value.trim();
+            const isNewRoom = !roomId; // Flag to track if this is a new room
+            if (isNewRoom) {
+                roomId = generateRoomId();
+            }
+            
+            // Display room ID
+            currentRoomIdSpan.textContent = roomId;
+            
+            try {
+                // Show a loading indicator
+                statusText.textContent = 'Initializing...';
+                statusText.className = 'status-text status-warning';
+                
+                localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+                await applyLowLatencySettings(localStream);
+                
+                // Initialize audio devices list after getting permissions
+                await updateAudioDevices();
+                
+                // Store the initial microphone ID
+                const audioTrack = localStream.getAudioTracks()[0];
+                if (audioTrack) {
+                    const settings = audioTrack.getSettings();
+                    currentMicrophoneId = settings.deviceId;
+                    if (micSelect) {
+                        micSelect.value = currentMicrophoneId;
+                    }
+                }
+                
+                // Handle localVideo reference
+                // First try to get the current element if it exists
+                const localVideoElement = document.getElementById('localVideo');
+                if (localVideoElement) {
+                    // Update the srcObject of the existing element
+                    localVideoElement.srcObject = localStream;
+                } else if (localVideo) {
+                    // If the localVideo variable is defined but element doesn't exist in DOM
+                    localVideo.srcObject = localStream;
+                }
+                
+                // Apply proper transition from join to conference screen
+                setupScreen.classList.remove('fade-scale');
+                setupScreen.style.display = 'none';
+                
+                // Make sure conference screen is visible with animation
+                conferenceScreen.style.display = 'block';
+                conferenceScreen.classList.add('fade-scale');
+                
+                // Explicitly remove any properties that might interfere
+                conferenceScreen.style.position = '';
+                conferenceScreen.style.top = '';
+                conferenceScreen.style.left = '';
+                
+                // Pass isNewRoom flag to identify the host
+                const userId = signaling.joinRoom(roomId, isNewRoom);
+                setupSignalingListeners(signaling);
+                window.signaling = signaling;
+                
+                // Update the UI to show host status
+                if (isNewRoom) {
+                    document.querySelector('.video-wrapper.local .video-overlay').textContent = 'You (Host)';
+                }
+                
+                // Ensure references are up to date with new DOM elements
+                if (window.domReferences) {
+                    window.domReferences.ensureReferences();
+                }
+                
+                startNetworkMonitoring();
+                
+            } catch (error) {
+                console.error('Error accessing media devices:', error);
+                alert('Could not access camera and microphone. Please check permissions.');
+                
+                // Reset UI on error
+                setupScreen.style.display = 'flex';
+                conferenceScreen.style.display = 'none';
+                statusText.textContent = 'Ready to join';
+                statusText.className = 'status-text';
+            }
+        }
     </script>
 </body>
 </html>
