@@ -3569,6 +3569,34 @@
                     // Create a peer connection for the new user
                     const pc = createPeerConnection(data.userId, data.userName);
                     
+                    // If current user is screen sharing, ensure tracks are properly set
+                    if (isScreenSharing && window.originalCameraTrack) {
+                        try {
+                            // Create a combined stream with both screen share and camera tracks
+                            const screenTrack = localStream.getVideoTracks()[0];
+                            const combinedStream = new MediaStream();
+                            
+                            // Check if tracks already exist in the peer connection
+                            const existingSenders = pc.getSenders();
+                            const existingTracks = existingSenders.map(sender => sender.track?.id);
+                            
+                            // Only add tracks that aren't already in the peer connection
+                            if (!existingTracks.includes(screenTrack.id)) {
+                                combinedStream.addTrack(screenTrack);
+                                pc.addTrack(screenTrack, combinedStream);
+                            }
+                            
+                            if (!existingTracks.includes(window.originalCameraTrack.id)) {
+                                combinedStream.addTrack(window.originalCameraTrack);
+                                pc.addTrack(window.originalCameraTrack, combinedStream);
+                            }
+                            
+                            console.log(`Added screen share and camera tracks for new participant ${data.userName}`);
+                        } catch (error) {
+                            console.error(`Error adding tracks to peer connection for ${data.userName}:`, error);
+                        }
+                    }
+                    
                     // Create and send an offer (handled by negotiationneeded event)
                 }
             });
@@ -4829,17 +4857,50 @@
             // Look for all screen sharing video wrappers
             const screenShareWrappers = document.querySelectorAll('.video-wrapper.screen-sharing');
             
+            // If no screen sharing is happening, nothing to do
+            if (screenShareWrappers.length === 0) {
+                return;
+            }
+            
+            console.log(`Checking ${screenShareWrappers.length} screen sharing wrappers for camera overlays...`);
+            
             screenShareWrappers.forEach(wrapper => {
                 const userId = wrapper.id.replace('video-wrapper-', '');
-                const cameraOverlay = document.getElementById(`camera-overlay-${userId}`);
+                let cameraOverlay = document.getElementById(`camera-overlay-${userId}`);
                 
-                if (cameraOverlay) {
-                    // Ensure the camera overlay is visible
+                // Check if we have a peer connection for this user
+                const pc = peerConnections[userId];
+                
+                if (!cameraOverlay && pc) {
+                    console.log(`Camera overlay missing for screen sharing user ${userId}, attempting to recreate it...`);
+                    
+                    // Attempt to create the missing camera overlay
+                    cameraOverlay = createMissingCameraOverlay(userId, wrapper, pc);
+                
+                    // Ensure the camera overlay is visible and properly styled
                     wrapper.classList.add('has-remote-camera');
-                    cameraOverlay.style.display = 'flex';
-                    cameraOverlay.style.visibility = 'visible';
-                    cameraOverlay.style.opacity = '1';
-                    console.log(`Automatically restored camera overlay for user ${userId}`);
+                    cameraOverlay.style.cssText = `
+                        display: flex !important;
+                        visibility: visible !important;
+                        opacity: 1 !important;
+                        z-index: 20 !important;
+                    `;
+                    
+                    // Also check if the video element inside is working
+                    const cameraVideo = document.getElementById(`camera-video-${userId}`);
+                    if (cameraVideo && (!cameraVideo.srcObject || !cameraVideo.srcObject.active)) {
+                        console.log(`Camera video feed missing for user ${userId}, attempting to restore...`);
+                        attemptToRestoreCameraFeed(userId, pc, cameraVideo);
+                    }
+                } else if (cameraOverlay) {
+                    // Ensure the overlay is visible even if it already exists
+                    wrapper.classList.add('has-remote-camera');
+                    cameraOverlay.style.cssText = `
+                        display: flex !important;
+                        visibility: visible !important;
+                        opacity: 1 !important;
+                        z-index: 20 !important;
+                    `;
                 }
             });
         }
@@ -4896,13 +4957,16 @@
                     console.log(`Camera overlay missing for screen sharing user ${userId}, attempting to recreate it...`);
                     
                     // Attempt to create the missing camera overlay
-                    createMissingCameraOverlay(userId, wrapper, pc);
-                } else if (cameraOverlay) {
+                    cameraOverlay = createMissingCameraOverlay(userId, wrapper, pc);
+                
                     // Ensure the camera overlay is visible and properly styled
                     wrapper.classList.add('has-remote-camera');
-                    cameraOverlay.style.display = 'flex';
-                    cameraOverlay.style.visibility = 'visible';
-                    cameraOverlay.style.opacity = '1';
+                    cameraOverlay.style.cssText = `
+                        display: flex !important;
+                        visibility: visible !important;
+                        opacity: 1 !important;
+                        z-index: 20 !important;
+                    `;
                     
                     // Also check if the video element inside is working
                     const cameraVideo = document.getElementById(`camera-video-${userId}`);
@@ -4910,6 +4974,15 @@
                         console.log(`Camera video feed missing for user ${userId}, attempting to restore...`);
                         attemptToRestoreCameraFeed(userId, pc, cameraVideo);
                     }
+                } else if (cameraOverlay) {
+                    // Ensure the overlay is visible even if it already exists
+                    wrapper.classList.add('has-remote-camera');
+                    cameraOverlay.style.cssText = `
+                        display: flex !important;
+                        visibility: visible !important;
+                        opacity: 1 !important;
+                        z-index: 20 !important;
+                    `;
                 }
             });
         }
@@ -4923,9 +4996,12 @@
             const cameraOverlay = document.createElement('div');
             cameraOverlay.id = `camera-overlay-${userId}`;
             cameraOverlay.className = 'remote-camera-overlay';
-            cameraOverlay.style.display = 'flex';
-            cameraOverlay.style.visibility = 'visible';
-            cameraOverlay.style.opacity = '1';
+            cameraOverlay.style.cssText = `
+                display: flex !important;
+                visibility: visible !important;
+                opacity: 1 !important;
+                z-index: 20 !important;
+            `;
             
             // Create the camera video element
             const cameraVideo = document.createElement('video');
@@ -4949,16 +5025,17 @@
             // Try to find camera track from the peer connection
             if (pc && pc.getReceivers) {
                 // Look through receivers for a video track that's not the screen share
+                let foundCameraTrack = false;
                 pc.getReceivers().forEach(receiver => {
-                    if (receiver.track && receiver.track.kind === 'video') {
+                    if (receiver.track && receiver.track.kind === 'video' && !foundCameraTrack) {
                         // Get track settings to determine if it's a camera or screen
-                        const settings = receiver.track.getSettings();
+                        const settings = receiver.track.getSettings ? receiver.track.getSettings() : {};
                         
                         // This is likely the camera track if it's smaller than typical screen share
                         if (!settings.displaySurface && (!settings.width || settings.width <= 1280)) {
-                            const cameraStream = new MediaStream([receiver.track]);
-                            cameraVideo.srcObject = cameraStream;
-                            console.log(`Restored camera feed for user ${userId} from existing track`);
+                            // Safe update of the video source with retry mechanism
+                            safeUpdateVideoSource(cameraVideo, receiver.track, `restored camera feed for ${userName}`);
+                            foundCameraTrack = true;
                             
                             // Set disabled state if track is muted
                             if (!receiver.track.enabled) {
@@ -4967,6 +5044,11 @@
                         }
                     }
                 });
+                
+                // If we couldn't find a camera track, mark as disabled
+                if (!foundCameraTrack) {
+                    cameraOverlay.classList.add('camera-disabled');
+                }
             }
             
             return cameraOverlay;
@@ -4979,12 +5061,18 @@
                 const videoReceivers = pc.getReceivers().filter(r => 
                     r.track && r.track.kind === 'video');
                 
+                // Log all tracks for debugging
+                videoReceivers.forEach((receiver, index) => {
+                    const settings = receiver.track.getSettings ? receiver.track.getSettings() : {};
+                    console.log(`Track ${index} for user ${userId}: width=${settings.width}, height=${settings.height}, displaySurface=${settings.displaySurface}`);
+                });
+                
                 if (videoReceivers.length >= 2) {
                     // If we have 2+ video tracks, the smaller one is likely the camera
                     let cameraTrack = null;
                     
                     for (const receiver of videoReceivers) {
-                        const settings = receiver.track.getSettings();
+                        const settings = receiver.track.getSettings ? receiver.track.getSettings() : {};
                         // This is likely the camera track if it's smaller
                         if (!settings.displaySurface && (!settings.width || settings.width <= 1280)) {
                             cameraTrack = receiver.track;
@@ -4998,9 +5086,8 @@
                     }
                     
                     if (cameraTrack) {
-                        const cameraStream = new MediaStream([cameraTrack]);
-                        cameraVideo.srcObject = cameraStream;
-                        console.log(`Restored camera feed for user ${userId} from receiver`);
+                        // Safe update of the video source with retry mechanism
+                        safeUpdateVideoSource(cameraVideo, cameraTrack, `restored camera feed for user ${userId}`);
                         
                         // Update disabled state
                         const cameraOverlay = document.getElementById(`camera-overlay-${userId}`);
@@ -5012,7 +5099,41 @@
                             }
                         }
                         
+                        // Also ensure the main video is showing the screen share, not the camera
+                        const videoWrapper = document.getElementById(`video-wrapper-${userId}`);
+                        if (videoWrapper && videoWrapper.classList.contains('screen-sharing')) {
+                            const mainVideo = document.getElementById(`video-${userId}`);
+                            if (mainVideo) {
+                                const nonCameraTracks = videoReceivers
+                                    .filter(r => r.track && r.track.id !== cameraTrack.id)
+                                    .map(r => r.track);
+                                    
+                                if (nonCameraTracks.length > 0) {
+                                    console.log(`Also updating main video for ${userId} to show screen content`);
+                                    const screenStream = new MediaStream([nonCameraTracks[0]]);
+                                    mainVideo.srcObject = screenStream;
+                                }
+                            }
+                        }
+                        
                         return true;
+                    }
+                } else if (videoReceivers.length === 1) {
+                    // If we only have one track, check if it's a misplaced screen share
+                    const track = videoReceivers[0].track;
+                    const settings = track.getSettings ? track.getSettings() : {};
+                    
+                    // Verify if we need to swap screen share and camera video
+                    const videoWrapper = document.getElementById(`video-wrapper-${userId}`);
+                    const mainVideo = document.getElementById(`video-${userId}`);
+                    
+                    if (videoWrapper && mainVideo && videoWrapper.classList.contains('screen-sharing')) {
+                        // If it looks like a screen share track, make sure it's in the main video
+                        if (settings.displaySurface || (settings.width > 1280 && settings.height > 720)) {
+                            console.log(`Found screen share track, ensuring it's in the main video for ${userId}`);
+                            const screenStream = new MediaStream([track]);
+                            mainVideo.srcObject = screenStream;
+                        }
                     }
                 }
             }
@@ -5328,6 +5449,352 @@
                 conferenceScreen.style.display = 'none';
                 statusText.textContent = 'Ready to join';
                 statusText.className = 'status-text';
+            }
+        }
+
+        // Enhanced version of track handling for new participants and reconnections
+        function handleTrack(event, pc, userId, userName, videoWrapper, mainVideo) {
+            console.log(`Track added from ${userName}: ${event.track.kind}, track ID: ${event.track.id}`);
+            
+            // Create a stream from the track
+            const stream = event.streams[0] || new MediaStream([event.track]);
+            
+            // Handle video tracks
+            if (event.track.kind === 'video') {
+                // Get all video tracks from the stream and from previous receivers
+                const streamVideoTracks = stream.getVideoTracks();
+                const allVideoTracks = [...streamVideoTracks];
+                
+                // Get tracks from all receivers to handle case where tracks arrive separately
+                if (pc.getReceivers) {
+                    pc.getReceivers().forEach(receiver => {
+                        if (receiver.track && 
+                            receiver.track.kind === 'video' && 
+                            !allVideoTracks.some(t => t.id === receiver.track.id)) {
+                            allVideoTracks.push(receiver.track);
+                        }
+                    });
+                }
+                
+                console.log(`Total video tracks from ${userName}: ${allVideoTracks.length}`);
+                
+                // Log detailed information about track for debugging
+                if (event.track.getSettings) {
+                    const settings = event.track.getSettings();
+                    console.log(`Track settings for ${userName}: width=${settings.width}, height=${settings.height}, displaySurface=${settings.displaySurface}`);
+                }
+                
+                // Mark this wrapper as potentially having screen share for future track arrivals
+                const isLikelyScreenShare = event.track.getSettings && 
+                    (event.track.getSettings().displaySurface || 
+                     (event.track.getSettings().width > 1280 && event.track.getSettings().height > 720));
+                
+                if (isLikelyScreenShare) {
+                    videoWrapper.dataset.possibleScreenShare = 'true';
+                    console.log(`Marking ${userName}'s video wrapper as possible screen share - track appears to be screen content`);
+                    
+                    // Immediately update the main video with this track if it looks like a screen share
+                    const screenStream = new MediaStream([event.track]);
+                    mainVideo.srcObject = screenStream;
+                    videoWrapper.classList.add('screen-sharing');
+                }
+                
+                // Store the track in a temporary collection for later completion when both tracks arrive
+                if (!window.pendingVideoTracks) {
+                    window.pendingVideoTracks = {};
+                }
+                
+                if (!window.pendingVideoTracks[userId]) {
+                    window.pendingVideoTracks[userId] = [];
+                }
+                
+                // Add this track if not already in the collection
+                if (!window.pendingVideoTracks[userId].some(t => t.id === event.track.id)) {
+                    window.pendingVideoTracks[userId].push(event.track);
+                    console.log(`Added track to pending collection for ${userName}, now has ${window.pendingVideoTracks[userId].length} tracks`);
+                }
+                
+                // When we have 2 or more video tracks, it's likely screen sharing + camera
+                if (allVideoTracks.length >= 2 || window.pendingVideoTracks[userId].length >= 2) {
+                    // Get all available tracks from our pending collection
+                    const videoTracks = window.pendingVideoTracks[userId].length >= 2 ? 
+                        window.pendingVideoTracks[userId] : allVideoTracks;
+                    
+                    // Determine which track is screen share based on track settings
+                    let screenTrack, cameraTrack;
+                    
+                    for (const track of videoTracks) {
+                        const settings = track.getSettings ? track.getSettings() : {};
+                        // Screen share tracks typically have displaySurface property or larger dimensions
+                        if (settings.displaySurface || (settings.width > 1280 && settings.height > 720)) {
+                            screenTrack = track;
+                        } else {
+                            cameraTrack = track;
+                        }
+                    }
+                    
+                    // If we couldn't determine which is which, use the first as screen and second as camera
+                    if (!screenTrack || !cameraTrack) {
+                        // Check if we have a screen share designation in our dataset
+                        if (videoWrapper.dataset.possibleScreenShare === 'true') {
+                            // Try to find the track that's most likely the screen share
+                            // Screen shares typically have higher resolution
+                            let maxResolution = 0;
+                            let maxResolutionTrackIndex = 0;
+                            
+                            videoTracks.forEach((track, index) => {
+                                if (track.getSettings) {
+                                    const settings = track.getSettings();
+                                    const resolution = (settings.width || 0) * (settings.height || 0);
+                                    if (resolution > maxResolution) {
+                                        maxResolution = resolution;
+                                        maxResolutionTrackIndex = index;
+                                    }
+                                }
+                            });
+                            
+                            screenTrack = videoTracks[maxResolutionTrackIndex];
+                            cameraTrack = videoTracks.find((track, index) => index !== maxResolutionTrackIndex);
+                            
+                            console.log(`Using resolution-based detection for ${userName}: identified screen and camera tracks`);
+                        } else {
+                            screenTrack = videoTracks[0];
+                            cameraTrack = videoTracks.length > 1 ? videoTracks[1] : null;
+                        }
+                    }
+                    
+                    // Create screen share stream for main video
+                    if (screenTrack) {
+                        console.log(`Setting screen share track for ${userName} as main video`);
+                        const screenStream = new MediaStream([screenTrack]);
+                        mainVideo.srcObject = screenStream;
+                        videoWrapper.classList.add('screen-sharing');
+                    }
+                    
+                    // Create or update camera overlay
+                    let cameraOverlay = document.getElementById(`camera-overlay-${userId}`);
+                    if (!cameraOverlay) {
+                        cameraOverlay = document.createElement('div');
+                        cameraOverlay.id = `camera-overlay-${userId}`;
+                        cameraOverlay.className = 'remote-camera-overlay';
+                        
+                        const cameraVideo = document.createElement('video');
+                        cameraVideo.id = `camera-video-${userId}`;
+                        cameraVideo.autoplay = true;
+                        cameraVideo.playsInline = true;
+                        
+                        const nameOverlay = document.createElement('div');
+                        nameOverlay.className = 'video-overlay';
+                        nameOverlay.textContent = userName;
+                        
+                        cameraOverlay.appendChild(cameraVideo);
+                        cameraOverlay.appendChild(nameOverlay);
+                        videoWrapper.appendChild(cameraOverlay);
+                    }
+                    
+                    // Set camera stream if we have a camera track
+                    if (cameraTrack) {
+                        console.log(`Setting camera track for ${userName} in overlay`);
+                        const cameraVideo = document.getElementById(`camera-video-${userId}`);
+                        
+                        if (cameraVideo) {
+                            // Safe update of the video source with retry mechanism
+                            safeUpdateVideoSource(cameraVideo, cameraTrack, `camera video for ${userName}`);
+                        }
+                        
+                        // If camera is enabled, remove disabled class
+                        if (cameraTrack.enabled) {
+                            cameraOverlay.classList.remove('camera-disabled');
+                        } else {
+                            cameraOverlay.classList.add('camera-disabled');
+                        }
+                    } else {
+                        // No camera track yet, mark as disabled
+                        cameraOverlay.classList.add('camera-disabled');
+                    }
+                    
+                    // Add class to indicate remote camera is attached
+                    videoWrapper.classList.add('has-remote-camera');
+                    
+                    // Ensure camera overlay is visible with stronger force
+                    cameraOverlay.style.cssText = `
+                        display: flex !important;
+                        visibility: visible !important;
+                        opacity: 1 !important;
+                        z-index: 20 !important;
+                    `;
+                    
+                    // Listen for enabled/disabled state changes if we have a camera track
+                    if (cameraTrack) {
+                        cameraTrack.onmute = () => cameraOverlay.classList.add('camera-disabled');
+                        cameraTrack.onunmute = () => cameraOverlay.classList.remove('camera-disabled');
+                    }
+                    
+                    // Log successful setup
+                    console.log(`Successfully set up screen sharing with camera for ${userName}`);
+                    
+                    // Trigger another check in 1 second to ensure everything is visible
+                    setTimeout(() => {
+                        if (typeof checkAndRestoreScreenShareOverlays === 'function') {
+                            checkAndRestoreScreenShareOverlays();
+                        }
+                    }, 1000);
+                } else if (allVideoTracks.length === 1) {
+                    // Single track - could be regular video or screen share without camera
+                    const track = allVideoTracks[0];
+                    const settings = track.getSettings ? track.getSettings() : {};
+                    
+                    // If this looks like a screen share track but we're missing the camera track
+                    if (settings.displaySurface || (settings.width > 1280 && settings.height > 720) || 
+                        videoWrapper.dataset.possibleScreenShare === 'true') {
+                        console.log(`Detected screen share from ${userName} but camera track is missing. Setting as main video and creating placeholder overlay.`);
+                        
+                        // Set the screen share as the main video
+                        mainVideo.srcObject = stream;
+                        videoWrapper.classList.add('screen-sharing');
+                        videoWrapper.dataset.possibleScreenShare = 'true';
+                        
+                        // Create a placeholder camera overlay that will show "Camera Off"
+                        let cameraOverlay = document.getElementById(`camera-overlay-${userId}`);
+                        if (!cameraOverlay) {
+                            cameraOverlay = document.createElement('div');
+                            cameraOverlay.id = `camera-overlay-${userId}`;
+                            cameraOverlay.className = 'remote-camera-overlay camera-disabled';
+                            
+                            const cameraVideo = document.createElement('video');
+                            cameraVideo.id = `camera-video-${userId}`;
+                            cameraVideo.autoplay = true;
+                            cameraVideo.playsInline = true;
+                            
+                            const nameOverlay = document.createElement('div');
+                            nameOverlay.className = 'video-overlay';
+                            nameOverlay.textContent = userName;
+                            
+                            cameraOverlay.appendChild(cameraVideo);
+                            cameraOverlay.appendChild(nameOverlay);
+                            videoWrapper.appendChild(cameraOverlay);
+                        }
+                        
+                        // Ensure overlay is visible
+                        videoWrapper.classList.add('has-remote-camera');
+                        cameraOverlay.style.cssText = `
+                            display: flex !important;
+                            visibility: visible !important;
+                            opacity: 1 !important;
+                            z-index: 20 !important;
+                        `;
+                                                
+                        // We'll keep the original ontrack handler to catch additional tracks
+                        const originalOnTrack = pc.ontrack;
+                        
+                        // Register for track additions - in case camera is added later
+                        pc.ontrack = (e) => {
+                            // Call the original handler first
+                            if (originalOnTrack && originalOnTrack !== pc.ontrack) {
+                                originalOnTrack.call(pc, e);
+                            }
+                            
+                            // Check if this is a new video track that might be the camera
+                            if (e.track.kind === 'video' && e.track.id !== track.id) {
+                                console.log(`Detected late camera track from ${userName}`);
+                                
+                                // Add to pending tracks
+                                if (!window.pendingVideoTracks[userId].some(t => t.id === e.track.id)) {
+                                    window.pendingVideoTracks[userId].push(e.track);
+                                }
+                                
+                                // Find camera video element
+                                const cameraVideo = document.getElementById(`camera-video-${userId}`);
+                                if (cameraVideo) {
+                                    // Safe update of the video source with retry mechanism
+                                    safeUpdateVideoSource(cameraVideo, e.track, `late camera track for ${userName}`);
+                                    cameraOverlay.classList.remove('camera-disabled');
+                                    
+                                    // Update track event handlers
+                                    e.track.onmute = () => cameraOverlay.classList.add('camera-disabled');
+                                    e.track.onunmute = () => cameraOverlay.classList.remove('camera-disabled');
+                                    
+                                    console.log(`Late camera track connected for ${userName}`);
+                                }
+                            }
+                        };
+                    } else {
+                        // Regular video call - single video track
+                        console.log(`Setting regular video for ${userName}`);
+                        mainVideo.srcObject = stream;
+                        videoWrapper.classList.remove('screen-sharing');
+                        
+                        // Remove camera overlay if exists
+                        const cameraOverlay = document.getElementById(`camera-overlay-${userId}`);
+                        if (cameraOverlay) {
+                            cameraOverlay.remove();
+                        }
+                    }
+                } else {
+                    // No video tracks detected
+                    mainVideo.srcObject = stream;
+                    console.log(`No video tracks detected for ${userName}`);
+                }
+                
+                // Apply settings for low latency playback
+                mainVideo.addEventListener('canplay', () => {
+                    mainVideo.play().catch(e => {
+                        console.warn(`Error playing main video for ${userName}:`, e);
+                        // Retry play after a short delay
+                        setTimeout(() => {
+                            mainVideo.play().catch(e2 => 
+                                console.error(`Failed to play main video on retry for ${userName}:`, e2));
+                        }, 500);
+                    });
+                    
+                    // Update stats when video starts playing
+                    const statsDiv = document.getElementById(`stats-${userId}`);
+                    if (statsDiv && statsDiv.textContent === 'Initializing...') {
+                        statsDiv.textContent = 'Video Playing';
+                    }
+                });
+            }
+        }
+        
+        // Helper function to safely update video source with retry
+        function safeUpdateVideoSource(videoElement, track, logContext) {
+            try {
+                // Create a new stream with just this track
+                const stream = new MediaStream([track]);
+                
+                // Check if the video element needs a source update
+                const currentTrackId = videoElement.srcObject?.getVideoTracks()[0]?.id;
+                if (currentTrackId !== track.id) {
+                    // Set source to the new stream
+                    videoElement.srcObject = stream;
+                    
+                    // Try to play with retry logic
+                    const playWithRetry = (retryCount = 0) => {
+                        videoElement.play().catch(error => {
+                            console.warn(`Failed to play ${logContext} (attempt ${retryCount + 1}):`, error);
+                            
+                            // Retry a few times with increasing delay
+                            if (retryCount < 3) {
+                                setTimeout(() => {
+                                    playWithRetry(retryCount + 1);
+                                }, 500 * (retryCount + 1));
+                            }
+                        });
+                    };
+                    
+                    // Add canplay event handler before starting play
+                    videoElement.addEventListener('canplay', function onCanPlay() {
+                        // Remove this handler after first trigger to avoid duplicates
+                        videoElement.removeEventListener('canplay', onCanPlay);
+                        
+                        // Start play with retry
+                        playWithRetry();
+                    }, { once: true });
+                    
+                    console.log(`Updated video source for ${logContext}`);
+                }
+            } catch (error) {
+                console.error(`Error updating video source for ${logContext}:`, error);
             }
         }
     </script>
