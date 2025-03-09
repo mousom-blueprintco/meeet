@@ -2181,6 +2181,14 @@
                             return;
                         }
                         
+                        // Handle leave-confirmed message
+                        if (signal.type === 'leave-confirmed') {
+                            console.log('Leave confirmed by server, closing WebSocket connection');
+                            // Close the WebSocket connection
+                            this.disconnect();
+                            return;
+                        }
+                        
                         // Dispatch to registered listeners
                         if (this.listeners[signal.type]) {
                             this.listeners[signal.type].forEach(callback => callback(signal));
