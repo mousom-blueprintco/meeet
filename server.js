@@ -673,7 +673,7 @@ function handleChatMessage(ws, data) {
   const { roomId, message, isPrivate, targetUserId } = data;
   const userId = ws.userId;
   
-  if (!userId || !roomId || !message) {
+  if (!userId || !roomId) {
     return sendError(ws, 'missing-parameters', 'Missing required parameters for chat message');
   }
   
@@ -687,6 +687,26 @@ function handleChatMessage(ws, data) {
   
   if (!sender) {
     return sendError(ws, 'not-in-room', 'You are not in this room');
+  }
+
+  // Handle media state updates
+  if (message && message.type === 'media-update') {
+    // Create media update message
+    const mediaUpdateMsg = {
+      type: 'message',
+      senderId: userId,
+      userName: sender.userName,
+      message: message
+    };
+    
+    // Broadcast to all users in the room
+    broadcastToRoom(roomId, mediaUpdateMsg, userId);
+    return;
+  }
+  
+  // Handle regular chat messages
+  if (!message) {
+    return sendError(ws, 'missing-parameters', 'Message content is required');
   }
   
   // Create message object

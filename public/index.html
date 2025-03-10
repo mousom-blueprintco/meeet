@@ -1969,6 +1969,60 @@
                 padding-top: env(safe-area-inset-top);
             }
         }
+
+        /* Muted indicator styles */
+        .muted-indicator {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    background: rgba(202, 214, 253, 0.743);
+    color: #fff;
+    padding: 6px 10px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    justify-content: center;
+    z-index: 10;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(4px);
+    font-size: 13px;
+}
+
+/* Style for the SVG container */
+.muted-indicator span {
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+}
+
+/* Control SVG size */
+.muted-indicator svg {
+    width: 1.2rem;
+    height: 1.2rem;
+}
+
+/* Remove the pulse animation and red overlay */
+.video-wrapper:has(.muted-indicator)::before {
+    display: none;
+}
+
+/* Add styles for clean exit animation */
+.exiting {
+    animation: exit-fade 0.5s ease-out forwards;
+}
+
+/* Define the exit animation */
+@keyframes exit-fade {
+    from {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+}
     </style>
 </head>
 <body>
@@ -3339,7 +3393,7 @@
                     audioTrack.enabled = !currentState;
                     console.log(`Audio track '${audioTrack.label}' toggled from ${currentState} to ${audioTrack.enabled}`);
                     
-                    // Update UI
+                    // Update UI - only toggle button state for local user
                     toggleAudioButton.classList.toggle('active');
                     
                     // Notify peers of audio state change if signaling is available
@@ -3350,27 +3404,6 @@
                             userId: window.signaling.userId
                         };
                         window.signaling.broadcast(message);
-                    }
-                    
-                    // When muted, add a visual indicator
-                    const localVideoContainer = document.querySelector('.video-wrapper.local');
-                    if (localVideoContainer) {
-                        if (!audioTrack.enabled) {
-                            // Add muted indicator if not present
-                            if (!document.getElementById('local-muted-indicator')) {
-                                const muteIndicator = document.createElement('div');
-                                muteIndicator.id = 'local-muted-indicator';
-                                muteIndicator.className = 'muted-indicator';
-                                muteIndicator.innerHTML = '<i class="fas fa-microphone-slash"></i>';
-                                localVideoContainer.appendChild(muteIndicator);
-                            }
-                        } else {
-                            // Remove muted indicator if present
-                            const muteIndicator = document.getElementById('local-muted-indicator');
-                            if (muteIndicator) {
-                                muteIndicator.remove();
-                            }
-                        }
                     }
                 }
             }
@@ -3463,43 +3496,21 @@
         async function toggleScreenShare() {
             try {
                 if (!isScreenSharing) {
-                    // Check if on mobile device
-                    if (isMobileDevice()) {
-                        // Special handling for iOS (not supported)
-                        if (isIOSDevice()) {
-                            showNotification('Screen sharing is not supported on iOS browsers. Please use a desktop browser for this feature.', 'warning', 5000);
-                            return;
-                        }
-                        
-                        // Special handling for Android
-                        if (isAndroidDevice()) {
-                            // Show guidance for Android users
-                            showNotification('On Android, you may need to enable screen sharing in your browser settings. Look for "Site settings" > "Screen sharing" or similar options.', 'info', 8000);
-                            
-                            // Different options for Android
-                            const screenConstraints = {
-                                video: {
-                                    displaySurface: 'window',
-                                    logicalSurface: true,
-                                    cursor: 'never'
-                                }
-                            };
-                            
-                            try {
-                                const screenStream = await navigator.mediaDevices.getDisplayMedia(screenConstraints);
-                                handleScreenShareSuccess(screenStream);
-                            } catch (err) {
-                                console.error('Error accessing screen on Android:', err);
-                                showNotification('Unable to access screen. This feature may not be supported on your device or browser version.', 'error');
-                            }
-                            return;
-                        }
-                    }
+                    // Store current audio track before screen sharing
+                    const currentAudioTrack = localStream.getAudioTracks()[0];
                     
-                    // Default desktop handling
+                    // Default desktop handling with explicit audio capture
                     const screenStream = await navigator.mediaDevices.getDisplayMedia({
-                        video: { cursor: 'always' }
+                        video: { 
+                            cursor: 'always',
+                            displaySurface: 'monitor'
+                        }
                     });
+                    
+                    // Add the current audio track to screen stream
+                    if (currentAudioTrack) {
+                        screenStream.addTrack(currentAudioTrack);
+                    }
                     
                     handleScreenShareSuccess(screenStream);
                 } else {
@@ -3517,33 +3528,90 @@
         function handleScreenShareSuccess(screenStream) {
             const screenTrack = screenStream.getVideoTracks()[0];
             window.originalCameraTrack = localStream.getVideoTracks()[0];
+            const existingAudioTrack = localStream.getAudioTracks()[0];
             
-            // Create a new stream with both screen share and camera tracks
-            const combinedStream = new MediaStream();
-            combinedStream.addTrack(screenTrack);
-            combinedStream.addTrack(window.originalCameraTrack);
+            // Keep track of the original stream's audio track
+            window.originalAudioTrack = existingAudioTrack;
             
             // Replace tracks in all peer connections
             Promise.all(Object.values(peerConnections).map(async pc => {
-                // First, find and remove any existing video senders
-                const senders = pc.getSenders();
-                const videoSenders = senders.filter(sender => 
-                    sender.track && sender.track.kind === 'video');
-                
-                // Remove existing video tracks
-                for (const sender of videoSenders) {
-                    pc.removeTrack(sender);
+                try {
+                    const transceivers = pc.getTransceivers();
+                    console.log('Current transceivers:', transceivers.map(t => ({
+                        mid: t.mid,
+                        kind: t.receiver.track?.kind,
+                        currentDirection: t.direction
+                    })));
+                    
+                    // First ensure we have all necessary transceivers in the correct order
+                    if (transceivers.length === 0) {
+                        // If no transceivers exist, create them in the correct order
+                        pc.addTransceiver('audio', {direction: 'sendrecv'});
+                        pc.addTransceiver('video', {direction: 'sendrecv'});
+                        pc.addTransceiver('video', {direction: 'sendrecv'});
+                    }
+                    
+                    // Get updated transceivers after ensuring they exist
+                    const updatedTransceivers = pc.getTransceivers();
+                    
+                    // Replace tracks in existing transceivers
+                    for (let i = 0; i < updatedTransceivers.length; i++) {
+                        const transceiver = updatedTransceivers[i];
+                        
+                        if (transceiver.receiver.track.kind === 'audio' && existingAudioTrack) {
+                            console.log('Replacing audio track in transceiver:', transceiver.mid);
+                            await transceiver.sender.replaceTrack(existingAudioTrack);
+                        } else if (transceiver.receiver.track.kind === 'video') {
+                            if (i === 1) { // First video transceiver gets screen share
+                                console.log('Replacing video track with screen share in transceiver:', transceiver.mid);
+                                await transceiver.sender.replaceTrack(screenTrack);
+                            } else if (i === 2) { // Second video transceiver gets camera
+                                console.log('Replacing video track with camera in transceiver:', transceiver.mid);
+                                await transceiver.sender.replaceTrack(window.originalCameraTrack);
+                            }
+                        }
+                    }
+                    
+                    // Create offer while maintaining the order
+                    const offer = await pc.createOffer();
+                    
+                    // Log the SDP for debugging
+                    console.log('Generated offer SDP:', offer.sdp);
+                    
+                    // Set local description
+                    await pc.setLocalDescription(offer);
+                    
+                    // Send the offer through signaling
+                    if (window.signaling && pc.remoteUserId) {
+                        window.signaling.sendOffer(pc.remoteUserId, pc.localDescription);
+                    }
+                } catch (e) {
+                    console.error('Error updating tracks for screen share:', e);
+                    // Try to recover by renegotiating
+                    try {
+                        if (pc.signalingState === 'stable') {
+                            const offer = await pc.createOffer();
+                            await pc.setLocalDescription(offer);
+                            if (window.signaling && pc.remoteUserId) {
+                                window.signaling.sendOffer(pc.remoteUserId, pc.localDescription);
+                            }
+                        }
+                    } catch (recoveryError) {
+                        console.error('Recovery attempt failed:', recoveryError);
+                    }
                 }
-                
-                // Add both screen share and camera tracks
-                pc.addTrack(screenTrack, combinedStream);
-                pc.addTrack(window.originalCameraTrack, combinedStream);
             }));
             
-            // Update local video to show screen share
-            localStream.removeTrack(window.originalCameraTrack);
-            localStream.addTrack(screenTrack);
-            localVideo.srcObject = localStream;
+            // Update local video while preserving audio
+            const newLocalStream = new MediaStream();
+            newLocalStream.addTrack(screenTrack);
+            if (existingAudioTrack) {
+                newLocalStream.addTrack(existingAudioTrack);
+            }
+            localVideo.srcObject = newLocalStream;
+            
+            // Update the local stream reference
+            localStream = newLocalStream;
             
             // Create camera overlay with the original camera feed
             createCameraOverlay();
@@ -3591,7 +3659,7 @@
             document.querySelector('.video-wrapper.local').classList.add('screen-sharing');
         }
 
-        // Update stopScreenShare function to properly handle both tracks
+        // Update stopScreenShare function to use transceivers
         async function stopScreenShare() {
             try {
                 if (!window.originalCameraTrack) {
@@ -3601,47 +3669,59 @@
                 
                 // Replace tracks in all peer connections
                 await Promise.all(Object.values(peerConnections).map(async pc => {
-                    // First, find and remove any existing video senders
-                const senders = pc.getSenders();
-                    const videoSenders = senders.filter(sender => 
-                        sender.track && sender.track.kind === 'video');
-                    
-                    // Remove existing video tracks
-                    for (const sender of videoSenders) {
-                        pc.removeTrack(sender);
+                    try {
+                        const transceivers = pc.getTransceivers();
+                        
+                        // Replace tracks in existing transceivers
+                        for (const transceiver of transceivers) {
+                            if (transceiver.receiver.track.kind === 'video') {
+                                // Replace all video tracks with the camera track
+                                await transceiver.sender.replaceTrack(window.originalCameraTrack);
+                            }
+                        }
+                        
+                        // Create and send offer
+                        const offer = await pc.createOffer();
+                        await pc.setLocalDescription(offer);
+                        
+                        if (window.signaling && pc.remoteUserId) {
+                            window.signaling.sendOffer(pc.remoteUserId, pc.localDescription);
+                        }
+                    } catch (e) {
+                        console.error('Error updating tracks when stopping screen share:', e);
                     }
-                    
-                    // Add back only the camera track
-                    pc.addTrack(window.originalCameraTrack, localStream);
                 }));
                 
-                // Stop all screen share tracks
+                // Stop screen share track
                 localStream.getVideoTracks().forEach(track => {
                     if (track.label !== window.originalCameraTrack.label) {
                         track.stop();
                     }
                 });
                 
-                // Update local video
-                const audioTrack = localStream.getAudioTracks()[0];
-                localStream = new MediaStream([window.originalCameraTrack]);
-                if (audioTrack) {
-                    localStream.addTrack(audioTrack);
+                // Create new stream with camera and original audio
+                const newLocalStream = new MediaStream();
+                newLocalStream.addTrack(window.originalCameraTrack);
+                if (window.originalAudioTrack) {
+                    newLocalStream.addTrack(window.originalAudioTrack);
                 }
+                
+                // Update local stream reference and video element
+                localStream = newLocalStream;
                 localVideo.srcObject = localStream;
                 
                 // Update UI
                 document.querySelector('.video-wrapper.local').classList.remove('screen-sharing');
                 const cameraOverlay = document.getElementById('cameraOverlay');
                 if (cameraOverlay) {
-                    cameraOverlay.classList.remove('active');
+                    cameraOverlay.remove();
                 }
                 
                 isScreenSharing = false;
                 shareScreenButton.classList.remove('active');
             } catch (error) {
                 console.error('Error stopping screen share:', error);
-                alert('Could not restore camera. Please refresh the page.');
+                showNotification('Error stopping screen share', 'error');
             }
         }
 
@@ -4454,6 +4534,55 @@
                             leaveCall();
                         }
                         break;
+                }
+            });
+            
+            // Handle media state updates from peers
+            signaling.on('message', (data) => {
+                if (data.message && data.message.type === 'media-update') {
+                    const { kind, enabled, userId } = data.message;
+                    const userName = data.userName || getUserNameFromUserId(userId);
+                    
+                    if (kind === 'audio') {
+                        // Show notification about audio state change
+                        const action = enabled ? 'unmuted' : 'muted';
+                        showNotification(`${userName} ${action} their microphone`, 'info', 3000);
+                        
+                        // Only update UI for remote users (not for local user)
+                        if (userId !== window.signaling.userId) {
+                            const videoWrapper = document.getElementById(`video-wrapper-${userId}`);
+                            if (videoWrapper) {
+                                const muteIndicator = videoWrapper.querySelector('.muted-indicator');
+                                if (!enabled && !muteIndicator) {
+                                    // Add muted indicator
+                                    const indicator = document.createElement('div');
+                                    indicator.className = 'muted-indicator';
+                                    indicator.innerHTML = `
+                                        <span><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Microphone Body -->
+  <rect x="40" y="20" width="20" height="35" rx="5" fill="#444444"/>
+  
+  <!-- Microphone Base -->
+  <path d="M30 55 C30 68 45 75 50 75 C55 75 70 68 70 55" stroke="#444444" stroke-width="4" fill="none"/>
+  
+  <!-- Stand -->
+  <line x1="50" y1="75" x2="50" y2="85" stroke="#444444" stroke-width="4"/>
+  
+  <!-- Base Stand -->
+  <rect x="35" y="85" width="30" height="5" rx="2" fill="#444444"/>
+  
+  <!-- Slash Line -->
+  <line x1="25" y1="25" x2="75" y2="75" stroke="#e74c3c" stroke-width="5" stroke-linecap="round"/>
+</svg></span>
+                                    `;
+                                    videoWrapper.appendChild(indicator);
+                                } else if (enabled && muteIndicator) {
+                                    // Remove muted indicator
+                                    muteIndicator.remove();
+                                }
+                            }
+                        }
+                    }
                 }
             });
             
@@ -6247,14 +6376,7 @@
                 
                 // Apply settings for low latency playback
                 mainVideo.addEventListener('canplay', () => {
-                    mainVideo.play().catch(e => {
-                        console.warn(`Error playing main video for ${userName}:`, e);
-                        // Retry play after a short delay
-                        setTimeout(() => {
-                            mainVideo.play().catch(e2 => 
-                                console.error(`Failed to play main video on retry for ${userName}:`, e2));
-                        }, 500);
-                    });
+                    mainVideo.play().catch(e => console.error('Error playing video:', e));
                     
                     // Update stats when video starts playing
                     const statsDiv = document.getElementById(`stats-${userId}`);
