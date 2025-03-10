@@ -14,6 +14,7 @@
     <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
     <title>FastMeet - Ultra Low Latency Video Conferencing</title>
     <style>
+        /* Google Meet inspired styles */
         body {
             font-family: 'Google Sans', 'Roboto', sans-serif;
             background: #202124;
@@ -3517,20 +3518,14 @@
             const screenTrack = screenStream.getVideoTracks()[0];
             window.originalCameraTrack = localStream.getVideoTracks()[0];
             
-            // Create a new stream with screen share, camera, and audio tracks
+            // Create a new stream with both screen share and camera tracks
             const combinedStream = new MediaStream();
             combinedStream.addTrack(screenTrack);
             combinedStream.addTrack(window.originalCameraTrack);
             
-            // Preserve the audio track from the original stream
-            const audioTrack = localStream.getAudioTracks()[0];
-            if (audioTrack) {
-                combinedStream.addTrack(audioTrack);
-            }
-            
             // Replace tracks in all peer connections
             Promise.all(Object.values(peerConnections).map(async pc => {
-                // First, find and remove any existing video and audio senders
+                // First, find and remove any existing video senders
                 const senders = pc.getSenders();
                 const videoSenders = senders.filter(sender => 
                     sender.track && sender.track.kind === 'video');
@@ -3540,24 +3535,14 @@
                     pc.removeTrack(sender);
                 }
                 
-                // Add screen share and camera tracks
+                // Add both screen share and camera tracks
                 pc.addTrack(screenTrack, combinedStream);
                 pc.addTrack(window.originalCameraTrack, combinedStream);
-                
-                // Ensure audio track is properly connected
-                if (audioTrack) {
-                    const audioSender = senders.find(sender => 
-                        sender.track && sender.track.kind === 'audio');
-                    if (audioSender) {
-                        audioSender.replaceTrack(audioTrack);
-                    } else {
-                        pc.addTrack(audioTrack, combinedStream);
-                    }
-                }
             }));
             
             // Update local video to show screen share
-            localStream = combinedStream; // Update the local stream reference
+            localStream.removeTrack(window.originalCameraTrack);
+            localStream.addTrack(screenTrack);
             localVideo.srcObject = localStream;
             
             // Create camera overlay with the original camera feed
