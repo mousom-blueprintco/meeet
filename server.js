@@ -443,7 +443,8 @@ function handleJoin(ws, data) {
     userName,
     isHost: shouldBeHost,
     connected: true,
-    joinedAt: Date.now()
+    joinedAt: Date.now(),
+    audioEnabled: true  // Add initial audio state
   });
   
   // Store session for reconnection
@@ -472,7 +473,8 @@ function handleJoin(ws, data) {
     .map(([id, user]) => ({
       userId: id,
       userName: user.userName,
-      isHost: user.isHost
+      isHost: user.isHost,
+      audioEnabled: user.audioEnabled  // Include audio state
     }));
   
   ws.send(JSON.stringify({
@@ -691,6 +693,11 @@ function handleChatMessage(ws, data) {
 
   // Handle media state updates
   if (message && message.type === 'media-update') {
+    // Update the user's audio state in the room
+    if (message.kind === 'audio') {
+        sender.audioEnabled = message.enabled;
+    }
+    
     // Create media update message
     const mediaUpdateMsg = {
       type: 'message',
