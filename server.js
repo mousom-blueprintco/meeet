@@ -53,6 +53,11 @@ app.get('/join/:roomId', (req, res) => {
   res.redirect(`/?room=${req.params.roomId}`);
 });
 
+// route for health check
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
+
 // Cache for frequently accessed data
 const roomCache = new Map();
 const clearRoomCache = (roomId) => roomCache.delete(roomId);
@@ -444,7 +449,8 @@ function handleJoin(ws, data) {
     isHost: shouldBeHost,
     connected: true,
     joinedAt: Date.now(),
-    audioEnabled: true  // Add initial audio state
+    audioEnabled: true,  // Add initial audio state
+    videoEnabled: true   // Add initial video state
   });
   
   // Store session for reconnection
@@ -474,7 +480,8 @@ function handleJoin(ws, data) {
       userId: id,
       userName: user.userName,
       isHost: user.isHost,
-      audioEnabled: user.audioEnabled  // Include audio state
+      audioEnabled: user.audioEnabled,  // Include audio state
+      videoEnabled: user.videoEnabled   // Include video state
     }));
   
   ws.send(JSON.stringify({
@@ -513,10 +520,15 @@ function handleReconnect(ws, data) {
     
     if (existingUser) {
         const wasHost = existingUser.isHost;
-        // Update user's connection
+        // Update user's connection while preserving media state
+        const previousAudioState = existingUser.audioEnabled;
+        const previousVideoState = existingUser.videoEnabled;
+        
         existingUser.ws = ws;
         existingUser.connected = true;
         existingUser.disconnectedAt = null;
+        existingUser.audioEnabled = previousAudioState;
+        existingUser.videoEnabled = previousVideoState;
         
         console.log(`User ${userName} (${userId}) reconnected to room ${roomId}`);
         
@@ -530,21 +542,25 @@ function handleReconnect(ws, data) {
             }));
         }
         
-        // Notify others about reconnection
+        // Notify others about reconnection with media state
         broadcastToRoom(roomId, {
             type: 'user-reconnected',
             userId: userId,
             userName: userName,
-            wasHost: wasHost
+            wasHost: wasHost,
+            audioEnabled: previousAudioState,
+            videoEnabled: previousVideoState
         }, userId);
         
-        // Send current participants to reconnected user
+        // Send current participants to reconnected user with their media states
         const participants = Array.from(room.entries())
             .filter(([id]) => id !== userId)
             .map(([id, user]) => ({
                 userId: id,
                 userName: user.userName,
-                isHost: user.isHost
+                isHost: user.isHost,
+                audioEnabled: user.audioEnabled,
+                videoEnabled: user.videoEnabled
             }));
         
         ws.send(JSON.stringify({
@@ -553,6 +569,12 @@ function handleReconnect(ws, data) {
             participants,
             isHost: existingUser.isHost
         }));
+    } else {
+        // User not found in room but has valid session - handle as new join
+        handleJoin(ws, {
+            ...data,
+            isHost: session.isHost
+        });
     }
 }
 

@@ -2096,7 +2096,7 @@
 
         <form id="joinRoomForm" class="join-form w-full bg-gray-800 rounded-xl shadow-lg p-6 relative">
             <!-- Status indicator -->
-            <div
+            <div id="health-status"
                 class="absolute top-4 right-4 flex items-center gap-1 bg-green-900/20 text-green-500 px-2 py-1 rounded-full text-xs">
                 <span class="w-2 h-2 rounded-full bg-green-500"></span>
                 Live
@@ -2868,6 +2868,37 @@
                 }
             }
         }
+
+        // Function to update the health status display
+        async function pingHealth() {
+            const url = `${window.location.protocol}//${window.location.host}/health`;
+            const statusElement = document.getElementById('health-status');
+
+            try {
+                const response = await fetch(url);
+                if (response.status === 200) {
+                    // Service is healthy: show "Live" with green dot.
+                    statusElement.innerHTML = `<span class="w-2 h-2 rounded-full bg-green-500"></span> Live`;
+                    statusElement.classList.remove('bg-red-900/20', 'text-red-500');
+                    statusElement.classList.add('bg-green-900/20', 'text-green-500');
+                } else {
+                    // Non-200 status: show "Offline" with red dot.
+                    statusElement.innerHTML = `<span class="w-2 h-2 rounded-full bg-red-500"></span> Offline`;
+                    statusElement.classList.remove('bg-green-900/20', 'text-green-500');
+                    statusElement.classList.add('bg-red-900/20', 'text-red-500');
+                }
+            } catch (error) {
+                // Network error or exception: show "Offline" with red dot.
+                statusElement.innerHTML = `<span class="w-2 h-2 rounded-full bg-red-500"></span> Offline`;
+                statusElement.classList.remove('bg-green-900/20', 'text-green-500');
+                statusElement.classList.add('bg-red-900/20', 'text-red-500');
+            }
+        }
+
+        // Immediately check health and then every 2 minutes (120000 ms)
+        pingHealth();
+        setInterval(pingHealth, 2 * 60 * 1000);
+
 
         // Function to ensure clean join process
         function cleanJoinProcess() {
@@ -4421,24 +4452,85 @@
 
             // When a user reconnects
             signaling.on('user-reconnected', (data) => {
-                console.log(`${data.userName || 'A user'} reconnected`);
+                const { userId, userName, wasHost, audioEnabled, videoEnabled } = data;
+                console.log(`${userName} reconnected with audio: ${audioEnabled}, video: ${videoEnabled}`);
 
                 // Show notification
-                if (data.userName) {
-                    showParticipantNotification(`${data.userName} reconnected`, 'join');
-                }
+                showNotification(`${userName} reconnected${wasHost ? ' (Previous Host)' : ''}`, 'success', 3000);
 
                 // Update UI to show connected state
-                const videoWrapper = document.getElementById(`video-wrapper-${data.userId}`);
+                const videoWrapper = document.getElementById(`video-wrapper-${userId}`);
                 if (videoWrapper) {
                     videoWrapper.classList.remove('disconnected');
+                    
+                    // Update mute indicator based on audio state
+                    const muteIndicator = videoWrapper.querySelector('.muted-indicator');
+                    if (!audioEnabled) {
+                        if (!muteIndicator) {
+                            const indicator = document.createElement('div');
+                            indicator.className = 'muted-indicator';
+                            indicator.innerHTML = `
+                                <i class="fas fa-microphone-slash"></i>
+                                <span>Muted</span>
+                            `;
+                            videoWrapper.appendChild(indicator);
+                        }
+                    } else if (muteIndicator) {
+                        muteIndicator.remove();
+                    }
+
+                    // Update video state
+                    const videoElement = videoWrapper.querySelector('video');
+                    if (videoElement) {
+                        if (!videoEnabled) {
+                            videoElement.style.display = 'none';
+                            // Show avatar or placeholder
+                            const placeholder = videoWrapper.querySelector('.video-placeholder') || 
+                                document.createElement('div');
+                            placeholder.className = 'video-placeholder';
+                            placeholder.textContent = userName.charAt(0).toUpperCase();
+                            videoWrapper.appendChild(placeholder);
+                        } else {
+                            videoElement.style.display = 'block';
+                            const placeholder = videoWrapper.querySelector('.video-placeholder');
+                            if (placeholder) {
+                                placeholder.remove();
+                            }
+                        }
+                    }
 
                     // Update stats display
-                    const statsDiv = document.getElementById(`stats-${data.userId}`);
+                    const statsDiv = document.getElementById(`stats-${userId}`);
                     if (statsDiv) {
                         statsDiv.textContent = 'Reconnected';
                     }
                 }
+
+                // Re-establish WebRTC connection
+                if (peerConnections[userId]) {
+                    // Close existing connection
+                    peerConnections[userId].close();
+                    delete peerConnections[userId];
+                }
+
+                // Create new peer connection
+                const pc = createPeerConnection(userId, userName);
+                
+                // Create and send offer
+                pc.createOffer()
+                    .then(offer => pc.setLocalDescription(offer))
+                    .then(() => {
+                        signaling.send({
+                            type: 'offer',
+                            targetUserId: userId,
+                            roomId: currentRoom,
+                            sdp: pc.localDescription
+                        });
+                    })
+                    .catch(error => {
+                        console.error('Error creating offer after reconnection:', error);
+                        showNotification('Failed to reconnect with peer. Please refresh the page.', 'error', 5000);
+                    });
             });
 
             // When a new host is assigned
@@ -4687,7 +4779,7 @@
             // When we receive a room-joined event
             signaling.on('room-joined', (data) => {
                 console.log('Room joined, processing participants:', data.participants);
-                
+
                 // Process each participant's initial state
                 data.participants.forEach(participant => {
                     // If the participant is muted, show the mute indicator
@@ -4703,6 +4795,77 @@
                                     <span>Muted</span>
                                 `;
                                 videoWrapper.appendChild(indicator);
+                            }
+                        }
+                    }
+                });
+            });
+
+            // When we receive a room-rejoined event
+            signaling.on('room-rejoined', (data) => {
+                console.log('Room rejoined, processing participants:', data.participants);
+                currentRoom = data.roomId;
+
+                // Process each participant's state
+                data.participants.forEach(participant => {
+                    const { userId, userName, isHost, audioEnabled, videoEnabled } = participant;
+                    
+                    // Create new peer connection if needed
+                    if (!peerConnections[userId]) {
+                        const pc = createPeerConnection(userId, userName);
+                        
+                        // Create and send offer
+                        pc.createOffer()
+                            .then(offer => pc.setLocalDescription(offer))
+                            .then(() => {
+                                signaling.send({
+                                    type: 'offer',
+                                    targetUserId: userId,
+                                    roomId: currentRoom,
+                                    sdp: pc.localDescription
+                                });
+                            })
+                            .catch(error => {
+                                console.error('Error creating offer for participant:', error);
+                            });
+                    }
+
+                    // Update UI with participant's media state
+                    const videoWrapper = document.getElementById(`video-wrapper-${userId}`);
+                    if (videoWrapper) {
+                        // Update audio state
+                        const muteIndicator = videoWrapper.querySelector('.muted-indicator');
+                        if (!audioEnabled) {
+                            if (!muteIndicator) {
+                                const indicator = document.createElement('div');
+                                indicator.className = 'muted-indicator';
+                                indicator.innerHTML = `
+                                    <i class="fas fa-microphone-slash"></i>
+                                    <span>Muted</span>
+                                `;
+                                videoWrapper.appendChild(indicator);
+                            }
+                        } else if (muteIndicator) {
+                            muteIndicator.remove();
+                        }
+
+                        // Update video state
+                        const videoElement = videoWrapper.querySelector('video');
+                        if (videoElement) {
+                            if (!videoEnabled) {
+                                videoElement.style.display = 'none';
+                                // Show avatar or placeholder
+                                const placeholder = videoWrapper.querySelector('.video-placeholder') || 
+                                    document.createElement('div');
+                                placeholder.className = 'video-placeholder';
+                                placeholder.textContent = userName.charAt(0).toUpperCase();
+                                videoWrapper.appendChild(placeholder);
+                            } else {
+                                videoElement.style.display = 'block';
+                                const placeholder = videoWrapper.querySelector('.video-placeholder');
+                                if (placeholder) {
+                                    placeholder.remove();
+                                }
                             }
                         }
                     }
@@ -6125,7 +6288,7 @@
 
                     // Get the current mute state from the UI
                     const isMuted = toggleAudioButton.classList.contains('active');
-                    
+
                     // Set the new track's enabled state to match the UI
                     newAudioTrack.enabled = !isMuted;
 
