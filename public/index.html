@@ -5037,22 +5037,35 @@
                 const indicator = document.getElementById(`indicator-${userId}`);
 
                 if (statsDiv && stats) {
-                    const { latency, packetLoss, jitter } = stats;
+                    const { latency, packetLoss, jitter, qualityScore } = stats;
 
                     // Update stats display only if the connection is established
                     if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
-                        // Format stats with fixed width to prevent layout shifts
-                        statsDiv.textContent = `${latency.toString().padStart(3, ' ')}ms | Loss: ${packetLoss}% | Jitter: ${jitter}ms`;
+                        // Format stats with fixed width to prevent layout shifts and include quality score
+                        statsDiv.textContent = `${latency.toString().padStart(3, ' ')}ms | Loss: ${packetLoss}% | Jitter: ${jitter}ms | QoS: ${qualityScore || 'N/A'}`;
                     }
 
-                    // Update status indicator
+                    // Update status indicator based on quality score if available
                     if (indicator) {
-                        if (latency < 70 && packetLoss < 2) {
-                            indicator.className = 'status-indicator';
-                        } else if (latency < 150 && packetLoss < 5) {
-                            indicator.className = 'status-indicator warning';
+                        if (qualityScore !== undefined) {
+                            if (qualityScore >= 80) {
+                                indicator.className = 'status-indicator';
+                            } else if (qualityScore >= 60) {
+                                indicator.className = 'status-indicator';
+                            } else if (qualityScore >= 40) {
+                                indicator.className = 'status-indicator warning';
+                            } else {
+                                indicator.className = 'status-indicator error';
+                            }
                         } else {
-                            indicator.className = 'status-indicator error';
+                            // Fallback to original thresholds
+                            if (latency < 70 && packetLoss < 2) {
+                                indicator.className = 'status-indicator';
+                            } else if (latency < 150 && packetLoss < 5) {
+                                indicator.className = 'status-indicator warning';
+                            } else {
+                                indicator.className = 'status-indicator error';
+                            }
                         }
                     }
                 }
@@ -5663,10 +5676,21 @@
                     statsDiv.textContent = 'Measuring...';
                 }
 
+                // Initialize stats history
+                if (!pc.statsHistory) {
+                    pc.statsHistory = {
+                        pingHistory: [],
+                        packetDelays: [],
+                        jitterValues: [],
+                        packetLossValues: []
+                    };
+                }
+
                 let lastStats = {
                     latency: 0,
                     packetLoss: 0,
-                    jitter: 0
+                    jitter: 0,
+                    qualityScore: 100
                 };
 
                 const getStats = async () => {
@@ -5687,44 +5711,92 @@
                         });
 
                         if (inboundRtp) {
-                            let latency = 0;
-                            let jitter = inboundRtp.jitter ? Math.round(inboundRtp.jitter * 1000) : 0;
-                            let packetLoss = 0;
+                            // Raw measurements
+                            let instantLatency = 0;
+                            let instantJitter = inboundRtp.jitter ? Math.round(inboundRtp.jitter * 1000) : 0;
+                            let instantPacketLoss = 0;
 
+                            // Get raw latency values
                             if (remoteOutbound && remoteOutbound.timestamp && inboundRtp.timestamp) {
-                                latency = Math.round(inboundRtp.timestamp - remoteOutbound.timestamp);
+                                instantLatency = Math.round(inboundRtp.timestamp - remoteOutbound.timestamp);
+                                
+                                // Store packet delay for improved jitter calculation
+                                pc.statsHistory.packetDelays.push(instantLatency);
+                                // Keep only recent values
+                                if (pc.statsHistory.packetDelays.length > 20) {
+                                    pc.statsHistory.packetDelays.shift();
+                                }
                             } else if (candidatePair && candidatePair.currentRoundTripTime) {
-                                latency = Math.round(candidatePair.currentRoundTripTime * 1000);
+                                instantLatency = Math.round(candidatePair.currentRoundTripTime * 1000);
                             }
 
+                            // Calculate packet loss
                             if (inboundRtp.packetsLost !== undefined && inboundRtp.packetsReceived !== undefined) {
                                 const totalPackets = inboundRtp.packetsLost + inboundRtp.packetsReceived;
                                 if (totalPackets > 0) {
-                                    packetLoss = Math.round((inboundRtp.packetsLost / totalPackets) * 100);
+                                    instantPacketLoss = Math.round((inboundRtp.packetsLost / totalPackets) * 100);
                                 }
                             }
 
-                            // Only update if values changed significantly to prevent UI flicker
-                            const hasSignificantChange =
-                                Math.abs(latency - lastStats.latency) > 5 ||
-                                Math.abs(packetLoss - lastStats.packetLoss) > 1 ||
-                                Math.abs(jitter - lastStats.jitter) > 5;
+                            // Store raw values in history
+                            pc.statsHistory.pingHistory.push(instantLatency);
+                            pc.statsHistory.jitterValues.push(instantJitter);
+                            pc.statsHistory.packetLossValues.push(instantPacketLoss);
 
-                            if (hasSignificantChange) {
-                                lastStats = { latency, packetLoss, jitter };
-
-                                // Update stats with debounce to prevent flickering
-                                if (pc.updateConnectionStats) {
-                                    pc.updateConnectionStats({
-                                        latency,
-                                        packetLoss,
-                                        jitter
-                                    });
-                                }
-
-                                // Update the global status text (debounced)
-                                debounceUpdateConnectionStatus(latency, packetLoss);
+                            // Keep history at reasonable size
+                            const maxHistoryLength = 10;
+                            if (pc.statsHistory.pingHistory.length > maxHistoryLength) {
+                                pc.statsHistory.pingHistory.shift();
+                                pc.statsHistory.jitterValues.shift();
+                                pc.statsHistory.packetLossValues.shift();
                             }
+
+                            // Calculate weighted moving average for latency
+                            let weightedLatency = 0;
+                            let weightSum = 0;
+                            pc.statsHistory.pingHistory.forEach((ping, index) => {
+                                const weight = (index + 1); // More recent = higher weight
+                                weightedLatency += ping * weight;
+                                weightSum += weight;
+                            });
+                            const latency = Math.round(weightedLatency / weightSum);
+
+                            // Calculate improved jitter - standard deviation of packet delays
+                            let jitter = 0;
+                            if (pc.statsHistory.packetDelays.length >= 3) {
+                                const mean = pc.statsHistory.packetDelays.reduce((sum, val) => sum + val, 0) / pc.statsHistory.packetDelays.length;
+                                const variance = pc.statsHistory.packetDelays.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / pc.statsHistory.packetDelays.length;
+                                jitter = Math.round(Math.sqrt(variance));
+                            } else {
+                                // Use WebRTC provided jitter as fallback
+                                jitter = instantJitter;
+                            }
+
+                            // Exponential moving average for packet loss (more responsive to recent changes)
+                            const alpha = 0.3; // Weight for current value (0-1)
+                            const packetLoss = Math.round(
+                                instantPacketLoss * alpha + 
+                                (lastStats.packetLoss * (1 - alpha))
+                            );
+
+                            // Calculate comprehensive network quality score (0-100)
+                            const qualityScore = calculateNetworkQualityScore(latency, jitter, packetLoss);
+
+                            // Update stats with debounce to prevent flickering
+                            if (pc.updateConnectionStats) {
+                                pc.updateConnectionStats({
+                                    latency,
+                                    packetLoss,
+                                    jitter,
+                                    qualityScore
+                                });
+                            }
+
+                            // Update the global status text (debounced)
+                            debounceUpdateConnectionStatus(latency, packetLoss, qualityScore);
+                            
+                            // Store for comparison next time
+                            lastStats = { latency, packetLoss, jitter, qualityScore };
                         }
                     } catch (e) {
                         console.error('Error getting stats:', e);
@@ -5736,6 +5808,68 @@
                 pc.statsIntervalId = setInterval(getStats, 1000);
             }
         }
+
+        // Network quality score calculation
+        function calculateNetworkQualityScore(latency, jitter, packetLoss) {
+            // Weightings for each metric
+            const weights = {
+                latency: 0.4,
+                jitter: 0.3,
+                packetLoss: 0.3
+            };
+            
+            // Normalize metrics to 0-1 scale (0 = bad, 1 = good)
+            const normalizedLatency = Math.max(0, 1 - (latency / 300)); // 300ms is considered very poor
+            const normalizedJitter = Math.max(0, 1 - (jitter / 100));   // 100ms jitter is very poor
+            const normalizedPacketLoss = Math.max(0, 1 - (packetLoss / 10)); // 10% loss is very poor
+            
+            // Calculate weighted score (0-100)
+            const score = 100 * (
+                (weights.latency * normalizedLatency) +
+                (weights.jitter * normalizedJitter) +
+                (weights.packetLoss * normalizedPacketLoss)
+            );
+            
+            return Math.round(score);
+        }
+
+        // Enhanced updateConnectionStatus function that uses the quality score
+        function updateConnectionStatus(latency, packetLoss, qualityScore) {
+            const statusText = document.getElementById('connection-status');
+            
+            if (!statusText) return;
+            
+            // Use quality score for better overall assessment if provided
+            if (qualityScore !== undefined) {
+                if (qualityScore >= 80) {
+                    statusText.textContent = `Excellent (${latency}ms)`;
+                    statusText.className = 'status-text status-good';
+                } else if (qualityScore >= 60) {
+                    statusText.textContent = `Good (${latency}ms)`;
+                    statusText.className = 'status-text status-good';
+                } else if (qualityScore >= 40) {
+                    statusText.textContent = `Fair (${latency}ms)`;
+                    statusText.className = 'status-text status-warning';
+                } else {
+                    statusText.textContent = `Poor (${latency}ms)`;
+                    statusText.className = 'status-text status-error';
+                }
+            } else {
+                // Fallback to original implementation for backward compatibility
+                if (latency < 70 && packetLoss < 2) {
+                    statusText.textContent = `Connected (${latency}ms)`;
+                    statusText.className = 'status-text status-good';
+                } else if (latency < 120) {
+                    statusText.textContent = `Connected (${latency}ms)`;
+                    statusText.className = 'status-text status-warning';
+                } else {
+                    statusText.textContent = `Connected (${latency}ms)`;
+                    statusText.className = 'status-text status-error';
+                }
+            }
+        }
+
+        // The existing debounceUpdateConnectionStatus will now use our enhanced updateConnectionStatus function
 
         // Update network statistics with real measurements if possible
         function updateNetworkStats() {

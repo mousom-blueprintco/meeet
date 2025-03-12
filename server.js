@@ -117,6 +117,21 @@ const serverMetrics = {
     total: 0,
     byType: {}
   },
+  network: {
+    avgLatency: 0,
+    avgJitter: 0,
+    pingStats: {
+      sent: 0,
+      received: 0, 
+      lost: 0
+    },
+    latencyDistribution: {
+      excellent: 0,    // 0-50ms
+      good: 0,         // 50-100ms
+      fair: 0,         // 100-200ms
+      poor: 0          // >200ms
+    }
+  },
   
   recordConnection() {
     this.connections.total++;
@@ -136,8 +151,63 @@ const serverMetrics = {
     this.errors.total++;
     this.errors.byType[type] = (this.errors.byType[type] || 0) + 1;
   },
+
+  recordNetworkStats() {
+    // Collect network statistics from all active connections
+    const connections = [];
+    let totalLatency = 0;
+    let totalJitter = 0;
+    let count = 0;
+    
+    // Reset latency distribution
+    this.network.latencyDistribution = {
+      excellent: 0,
+      good: 0,
+      fair: 0,
+      poor: 0
+    };
+
+    wss.clients.forEach(client => {
+      if (client.connectionQuality && client.isAlive) {
+        connections.push(client.connectionQuality);
+        
+        if (client.connectionQuality.avgLatency) {
+          totalLatency += client.connectionQuality.avgLatency;
+          
+          // Update latency distribution
+          const latency = client.connectionQuality.avgLatency;
+          if (latency <= 50) {
+            this.network.latencyDistribution.excellent++;
+          } else if (latency <= 100) {
+            this.network.latencyDistribution.good++;
+          } else if (latency <= 200) {
+            this.network.latencyDistribution.fair++;
+          } else {
+            this.network.latencyDistribution.poor++;
+          }
+        }
+        
+        if (client.connectionQuality.jitter) {
+          totalJitter += client.connectionQuality.jitter;
+        }
+        
+        count++;
+      }
+    });
+    
+    // Update averages
+    if (count > 0) {
+      this.network.avgLatency = Math.round(totalLatency / count);
+      this.network.avgJitter = Math.round(totalJitter / count);
+    }
+    
+    return connections;
+  },
   
   getStats() {
+    // Update network stats before returning
+    const networkConnections = this.recordNetworkStats();
+    
     return {
       uptime: Math.floor((Date.now() - this.startTime) / 1000),
       connections: this.connections,
@@ -147,6 +217,10 @@ const serverMetrics = {
         active: Array.from(rooms.values()).filter(room => room.size > 0).length
       },
       errors: this.errors,
+      network: {
+        ...this.network,
+        connections: networkConnections.length
+      },
       memory: {
         rss: Math.round(process.memoryUsage().rss / (1024 * 1024)),
         heapTotal: Math.round(process.memoryUsage().heapTotal / (1024 * 1024)),
@@ -272,14 +346,92 @@ app.get('/health', (req, res) => {
     status: 'OK',
     uptime: stats.uptime,
     connections: stats.connections.active,
-    rooms: stats.rooms.total
+    rooms: stats.rooms.total,
+    network: {
+      avgLatency: stats.network.avgLatency,
+      avgJitter: stats.network.avgJitter,
+      connectionQuality: getNetworkQualityRating(stats.network.avgLatency, stats.network.avgJitter)
+    }
   });
 });
 
-// Add metrics endpoint
+// Add metrics endpoint with enhanced network statistics
 app.get('/metrics', (req, res) => {
-  res.json(serverMetrics.getStats());
+  const stats = serverMetrics.getStats();
+  
+  // Add network quality score calculation
+  if (stats.network) {
+    stats.network.qualityScore = calculateOverallNetworkScore(stats.network);
+    stats.network.qualityRating = getNetworkQualityRating(
+      stats.network.avgLatency, 
+      stats.network.avgJitter
+    );
+  }
+  
+  res.json(stats);
 });
+
+// Helper function to get a qualitative network rating
+function getNetworkQualityRating(latency, jitter) {
+  if (!latency && !jitter) return 'Unknown';
+  
+  // Create a score based on latency and jitter
+  const latencyScore = latency ? Math.max(0, 1 - (latency / 300)) : 0.5; // 300ms is very poor
+  const jitterScore = jitter ? Math.max(0, 1 - (jitter / 100)) : 0.5;    // 100ms jitter is very poor
+  
+  // Combined score (0-1)
+  const combinedScore = (latencyScore * 0.7) + (jitterScore * 0.3);
+  
+  // Convert to rating
+  if (combinedScore >= 0.8) return 'Excellent';
+  if (combinedScore >= 0.6) return 'Good';
+  if (combinedScore >= 0.4) return 'Fair';
+  if (combinedScore >= 0.2) return 'Poor';
+  return 'Very Poor';
+}
+
+// Helper function to calculate an overall network score
+function calculateOverallNetworkScore(networkStats) {
+  if (!networkStats) return 0;
+  
+  const latency = networkStats.avgLatency || 0;
+  const jitter = networkStats.avgJitter || 0;
+  
+  // Normalize metrics to 0-1 scale (0 = bad, 1 = good)
+  const normalizedLatency = Math.max(0, 1 - (latency / 300)); // 300ms is considered very poor
+  const normalizedJitter = Math.max(0, 1 - (jitter / 100));   // 100ms jitter is very poor
+  
+  // Calculate connection distribution score
+  let distributionScore = 0;
+  const distribution = networkStats.latencyDistribution;
+  if (distribution) {
+    const total = distribution.excellent + distribution.good + distribution.fair + distribution.poor;
+    if (total > 0) {
+      distributionScore = (
+        (distribution.excellent * 1.0) + 
+        (distribution.good * 0.7) + 
+        (distribution.fair * 0.4) + 
+        (distribution.poor * 0.1)
+      ) / total;
+    }
+  }
+  
+  // Weightings
+  const weights = {
+    latency: 0.4,
+    jitter: 0.3,
+    distribution: 0.3
+  };
+  
+  // Calculate weighted score (0-100)
+  const score = 100 * (
+    (weights.latency * normalizedLatency) +
+    (weights.jitter * normalizedJitter) +
+    (weights.distribution * distributionScore)
+  );
+  
+  return Math.round(score);
+}
 
 // Optimized WebSocket server configuration
 const wss = new WebSocket.Server({ 
@@ -478,22 +630,69 @@ function sendError(ws, code, message) {
   }
 }
 
-// Enhanced ping system
+// Enhanced ping system with timing metrics
 const pingAllClients = () => {
   let activePings = 0;
   let closedConnections = 0;
+  const currentTime = Date.now();
   
   wss.clients.forEach((ws) => {
     if (ws.isAlive === false) {
       closedConnections++;
+      
+      // Record disconnection history for analysis
+      if (!ws.pingHistory) {
+        ws.pingHistory = [];
+      }
+      
+      // Add a final disconnection entry
+      ws.pingHistory.push({
+        status: 'disconnected',
+        timestamp: currentTime
+      });
+      
       handleDisconnection(ws);
       ws.terminate();
       return;
     }
     
+    // Initialize ping tracking if not exists
+    if (!ws.pingHistory) {
+      ws.pingHistory = [];
+    }
+    
+    // Initialize ping timestamp for timing measurement
+    ws.lastPingTime = currentTime;
+    
+    // Mark as not alive until pong received
     ws.isAlive = false;
-    ws.ping();
-    activePings++;
+    
+    // Send ping with current timestamp
+    const pingData = JSON.stringify({ type: 'ping', timestamp: currentTime });
+    try {
+      // Use a binary ping for WebSocket protocol pings (faster)
+      ws.ping();
+      
+      // Also send an application-level ping to measure app-level latency
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(pingData);
+      }
+      
+      activePings++;
+      
+      // Add ping attempt to history (limited to last 50 entries)
+      ws.pingHistory.push({
+        status: 'ping-sent',
+        timestamp: currentTime
+      });
+      
+      if (ws.pingHistory.length > 50) {
+        ws.pingHistory.shift();
+      }
+    } catch (error) {
+      console.error(`Error sending ping to client:`, error.message);
+      ws.isAlive = false;
+    }
   });
   
   // Only log if there's activity to reduce noise
@@ -640,16 +839,62 @@ wss.on('connection', (ws) => {
   ws.isAlive = true;
   ws.userId = null;
   ws.roomId = null;
+  ws.lastPingTime = Date.now();
+  ws.pingHistory = [];
+  ws.connectionQuality = {
+    avgLatency: 0,
+    jitter: 0,
+    reliability: 100,
+    lastPingTimestamp: Date.now()
+  };
 
   // Update metrics
   serverMetrics.recordConnection();
   
-  // Handle pong messages to keep connection alive
+  // Enhanced pong handler with timing information
   ws.on('pong', () => {
+    const pongTime = Date.now();
     ws.isAlive = true;
+    
+    // If we have a ping timestamp, calculate latency
+    if (ws.lastPingTime) {
+      const pingLatency = pongTime - ws.lastPingTime;
+      
+      // Update connection quality metrics
+      if (!ws.connectionQuality.latencies) {
+        ws.connectionQuality.latencies = [];
+      }
+      
+      // Store latest latency
+      ws.connectionQuality.latencies.push(pingLatency);
+      
+      // Keep only last 10 measurements
+      if (ws.connectionQuality.latencies.length > 10) {
+        ws.connectionQuality.latencies.shift();
+      }
+      
+      // Calculate average latency
+      const sum = ws.connectionQuality.latencies.reduce((a, b) => a + b, 0);
+      ws.connectionQuality.avgLatency = Math.round(sum / ws.connectionQuality.latencies.length);
+      
+      // Calculate jitter (standard deviation of latencies)
+      if (ws.connectionQuality.latencies.length > 1) {
+        const mean = ws.connectionQuality.avgLatency;
+        const squaredDiffs = ws.connectionQuality.latencies.map(l => Math.pow(l - mean, 2));
+        const variance = squaredDiffs.reduce((a, b) => a + b, 0) / ws.connectionQuality.latencies.length;
+        ws.connectionQuality.jitter = Math.round(Math.sqrt(variance));
+      }
+      
+      // Add to ping history
+      ws.pingHistory.push({
+        status: 'pong-received',
+        timestamp: pongTime,
+        latency: pingLatency
+      });
+    }
   });
 
-  // Handle incoming messages with optimized message handler
+  // Enhanced message handler with application-level ping/pong support
   ws.on('message', (message) => {
     let data;
     
@@ -659,6 +904,49 @@ wss.on('connection', (ws) => {
     } catch (error) {
       console.error('Invalid message format:', error.message);
       sendError(ws, 'invalid-message-format', 'Message must be valid JSON');
+      return;
+    }
+    
+    // Handle application-level ping
+    if (data.type === 'ping') {
+      // Respond with a pong containing the original timestamp and current timestamp
+      try {
+        const pongData = JSON.stringify({
+          type: 'pong',
+          clientTimestamp: data.timestamp,
+          serverTimestamp: Date.now()
+        });
+        ws.send(pongData);
+        return;
+      } catch (error) {
+        console.error('Error sending pong response:', error.message);
+      }
+    }
+    
+    // Handle application-level pong (client response to our ping)
+    if (data.type === 'pong') {
+      const receiveTime = Date.now();
+      const roundTripTime = receiveTime - data.clientTimestamp;
+      
+      // Update connection quality metrics
+      if (!ws.connectionQuality.appLatencies) {
+        ws.connectionQuality.appLatencies = [];
+      }
+      
+      ws.connectionQuality.appLatencies.push(roundTripTime);
+      
+      // Keep only last 10 measurements
+      if (ws.connectionQuality.appLatencies.length > 10) {
+        ws.connectionQuality.appLatencies.shift();
+      }
+      
+      // Update history
+      ws.pingHistory.push({
+        status: 'app-pong-received',
+        timestamp: receiveTime,
+        latency: roundTripTime
+      });
+      
       return;
     }
     
