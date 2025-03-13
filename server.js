@@ -19,6 +19,26 @@ const LIMITS = {
   MAX_INACTIVE_THRESHOLD: parseInt(process.env.MAX_INACTIVE_THRESHOLD) || 120000 // 2m
 };
 
+// Add this near other constants
+const HOST_COMMAND_LIMITS = {
+  CONFIRMATION_REQUIRED: ['remove-all', 'remove-user'],
+  RATE_LIMITS: {
+    'mute-all': { count: 3, period: 60000 }, // 3 per minute
+    'remove-user': { count: 5, period: 60000 }, // 5 per minute
+    'remove-all': { count: 1, period: 300000 }, // 1 per 5 minutes
+  }
+};
+
+// Add these constants near other app constants
+const CONNECTION_HEALTH = {
+  MAX_MISSED_PINGS: 3,               // Consider disconnected after this many consecutive missed pings
+  HEALTH_WINDOW_SIZE: 10,            // Track this many recent ping-pongs for health metrics
+  PING_TIMEOUT: 15000,               // Maximum time to wait for a pong response (15 seconds)
+  RELIABILITY_THRESHOLD_POOR: 0.5,   // Below 50% response rate is poor
+  RELIABILITY_THRESHOLD_FAIR: 0.8,   // Below 80% response rate is fair
+  RELIABILITY_THRESHOLD_GOOD: 0.95   // Below 95% response rate is good, above is excellent
+};
+
 // Initialize Express app and HTTP server
 const app = express();
 const server = http.createServer(app);
@@ -29,6 +49,7 @@ class LRUCache {
     this.maxSize = maxSize;
     this.cache = new Map();
     this.keys = [];
+    this.timeouts = new Map(); // Track timeouts for TTL-based expiration
   }
   
   get(key) {
@@ -42,12 +63,16 @@ class LRUCache {
   }
   
   set(key, value, ttl = 0) {
+    // Clear any existing timeout to prevent memory leaks and early eviction
+    this._clearTimeout(key);
+    
     // Update existing or add new
     if (this.cache.has(key)) {
       this.keys = this.keys.filter(k => k !== key);
     } else if (this.keys.length >= this.maxSize) {
       // Evict least recently used
       const lru = this.keys.shift();
+      this._clearTimeout(lru); // Clear timeout for evicted entry
       this.cache.delete(lru);
     }
     
@@ -56,17 +81,62 @@ class LRUCache {
     
     // Optional TTL
     if (ttl > 0) {
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         if (this.cache.has(key)) {
           this.delete(key);
         }
       }, ttl);
+      
+      // Store the timeout ID for potential early cancellation
+      this.timeouts.set(key, timeoutId);
     }
   }
   
   delete(key) {
+    this._clearTimeout(key);
     this.cache.delete(key);
     this.keys = this.keys.filter(k => k !== key);
+  }
+  
+  // Helper method to clear timeouts
+  _clearTimeout(key) {
+    if (this.timeouts.has(key)) {
+      clearTimeout(this.timeouts.get(key));
+      this.timeouts.delete(key);
+    }
+  }
+  
+  // Additional utility methods
+  
+  // Get the number of entries in the cache
+  size() {
+    return this.cache.size;
+  }
+  
+  // Check if a key exists
+  has(key) {
+    return this.cache.has(key);
+  }
+  
+  // Clear the entire cache
+  clear() {
+    // Clear all timeouts first
+    for (const timeoutId of this.timeouts.values()) {
+      clearTimeout(timeoutId);
+    }
+    
+    this.cache.clear();
+    this.keys = [];
+    this.timeouts.clear();
+  }
+  
+  // Optional: refresh TTL for an existing entry
+  refreshTTL(key, ttl) {
+    if (!this.cache.has(key)) return false;
+    
+    const value = this.cache.get(key);
+    this.set(key, value, ttl);
+    return true;
   }
 }
 
@@ -466,6 +536,37 @@ const CONNECTION_TIMEOUT = 10000; // 10 seconds
 const ROOM_CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
 const ROOM_INACTIVE_THRESHOLD = LIMITS.MAX_INACTIVE_THRESHOLD;
 
+// Add this to track command usage
+const hostCommandTracker = new Map();
+
+// Helper function to check rate limits
+function checkCommandRateLimit(userId, command) {
+  const now = Date.now();
+  const limit = HOST_COMMAND_LIMITS.RATE_LIMITS[command];
+  
+  if (!limit) return true; // No limit for this command
+  
+  const key = `${userId}:${command}`;
+  if (!hostCommandTracker.has(key)) {
+    hostCommandTracker.set(key, { count: 1, timestamps: [now] });
+    return true;
+  }
+  
+  const tracker = hostCommandTracker.get(key);
+  
+  // Remove timestamps older than the period
+  tracker.timestamps = tracker.timestamps.filter(t => now - t < limit.period);
+  
+  // Check if under the limit
+  if (tracker.timestamps.length < limit.count) {
+    tracker.timestamps.push(now);
+    tracker.count++;
+    return true;
+  }
+  
+  return false;
+}
+
 // Update room activity function
 function updateRoomActivity(roomId) {
   const timestamp = Date.now();
@@ -515,7 +616,7 @@ function removeUserFromRoom(userId, roomId) {
   }
 }
 
-// Improved broadcast function with Set-based lookups
+// Improved broadcast function with efficient message delivery and proper cleanup
 function broadcastToRoom(roomId, message, excludeUserId = null) {
   const room = rooms.get(roomId);
   if (!room) return 0;
@@ -527,18 +628,68 @@ function broadcastToRoom(roomId, message, excludeUserId = null) {
   const excluded = new Set(excludeUserId ? [excludeUserId] : []);
   
   // Convert message to JSON once if not already a string
-  const jsonMessage = typeof message === 'string' ? message : JSON.stringify(message);
+  let jsonMessage;
+  try {
+    jsonMessage = typeof message === 'string' ? message : JSON.stringify(message);
+  } catch (error) {
+    console.error('Failed to stringify message in broadcastToRoom:', error);
+    // Create a safe fallback message
+    jsonMessage = JSON.stringify({
+      type: 'error',
+      error: 'internal-error',
+      message: 'Failed to process message data'
+    });
+    serverMetrics.recordError('json-stringify-failed');
+  }
+  
+  if (!jsonMessage) {
+    console.error('Invalid message provided to broadcastToRoom');
+    return 0;
+  }
+  
   let sentCount = 0;
+  let disconnectedUsers = [];
   
   // Send to all connected users not in excluded set
   for (const [userId, user] of room.entries()) {
-    if (!excluded.has(userId) && user.connected && user.ws.readyState === WebSocket.OPEN) {
-      try {
-        user.ws.send(jsonMessage);
-        sentCount++;
-      } catch (error) {
-        console.error(`Error sending to ${userId}:`, error.message);
-        user.connected = false; // Mark as disconnected on error
+    if (excluded.has(userId)) continue;
+    
+    // Skip already known disconnected users for efficiency
+    if (!user.connected || user.ws.readyState !== WebSocket.OPEN) {
+      disconnectedUsers.push(userId);
+      continue;
+    }
+    
+    try {
+      user.ws.send(jsonMessage);
+      sentCount++;
+    } catch (error) {
+      console.error(`Error sending to ${userId}:`, error.message);
+      disconnectedUsers.push(userId);
+    }
+  }
+  
+  // Handle disconnected users after the broadcast loop
+  if (disconnectedUsers.length > 0) {
+    // Clean up disconnected users from the room
+    for (const userId of disconnectedUsers) {
+      const user = room.get(userId);
+      if (user) {
+        // If already marked as disconnected, leave it to the timeout to clean up
+        if (!user.connected) continue;
+        
+        // Mark as disconnected and start timeout for potential reconnect
+        user.connected = false;
+        user.disconnectedAt = Date.now();
+        
+        // Schedule immediate disconnect handling if not already done
+        process.nextTick(() => {
+          // Check if this user is still in the room - they might have been
+          // removed already by another process
+          if (room.has(userId)) {
+            handleDisconnection({ userId, roomId });
+          }
+        });
       }
     }
   }
@@ -546,44 +697,83 @@ function broadcastToRoom(roomId, message, excludeUserId = null) {
   return sentCount;
 }
 
-// Add host transfer mechanism
+// Improved host transfer mechanism with complete state updates
 function transferHostRole(roomId, oldHostId, newHostId) {
   const room = rooms.get(roomId);
-  if (!room) return false;
+  if (!room) {
+    console.error(`Cannot transfer host: Room ${roomId} not found`);
+    return false;
+  }
 
   const oldHost = room.get(oldHostId);
   const newHost = room.get(newHostId);
   
-  if (!oldHost || !newHost) return false;
+  if (!newHost) {
+    console.error(`Cannot transfer host: New host ${newHostId} not found in room ${roomId}`);
+    return false;
+  }
 
-  // Update host status
-  oldHost.isHost = false;
+  // Update host status in room data
+  if (oldHost) {
+    oldHost.isHost = false;
+    console.log(`Host status removed from ${oldHostId} in room ${roomId}`);
+  }
+  
   newHost.isHost = true;
+  console.log(`Host status granted to ${newHostId} in room ${roomId}`);
 
-  // Update session data
+  // Update session data - critical for persistence across reconnects
   const oldHostSession = userSessions.get(oldHostId);
   const newHostSession = userSessions.get(newHostId);
   
-  if (oldHostSession) oldHostSession.isHost = false;
-  if (newHostSession) newHostSession.isHost = true;
+  if (oldHostSession) {
+    oldHostSession.isHost = false;
+  }
+  
+  if (newHostSession) {
+    newHostSession.isHost = true;
+  } else {
+    // Create a session if it doesn't exist
+    userSessions.set(newHostId, {
+      roomId: roomId,
+      userName: newHost.userName,
+      isHost: true
+    });
+    console.log(`Created new session for host ${newHostId} in room ${roomId}`);
+  }
+
+  // If the newHost's WebSocket exists, make sure the user knows they're now host
+  if (newHost.connected && newHost.ws && newHost.ws.readyState === WebSocket.OPEN) {
+    try {
+      newHost.ws.send(JSON.stringify({
+        type: 'host-status-changed',
+        isHost: true,
+        message: 'You are now the host of this room'
+      }));
+      console.log(`Notified ${newHostId} of new host status`);
+    } catch (error) {
+      console.error(`Failed to notify new host ${newHostId}:`, error.message);
+    }
+  }
 
   return true;
 }
 
-// Add function to find the best candidate for new host
+// Fix for findNewHostCandidate to ensure we select a connected user
 function findNewHostCandidate(room, excludeUserId) {
   // Sort users by connection time (oldest first) and connection status
   const candidates = Array.from(room.entries())
     .filter(([userId, user]) => userId !== excludeUserId)
-    .sort((a, b) => {
-      // Prioritize connected users
-      if (a[1].connected && !b[1].connected) return -1;
-      if (!a[1].connected && b[1].connected) return 1;
-      // Then sort by join time
-      return a[1].joinedAt - b[1].joinedAt;
-    });
+    .filter(([_, user]) => user.connected && user.ws && user.ws.readyState === WebSocket.OPEN) // Only consider connected users
+    .sort((a, b) => a[1].joinedAt - b[1].joinedAt); // Oldest joined first
 
-  return candidates.length > 0 ? candidates[0][0] : null;
+  if (candidates.length > 0) {
+    console.log(`Selected new host candidate: ${candidates[0][0]}`);
+    return candidates[0][0];
+  }
+  
+  console.log(`No suitable host candidates found in room`);
+  return null;
 }
 
 // Function to validate and cleanup rooms
@@ -630,57 +820,88 @@ function sendError(ws, code, message) {
   }
 }
 
-// Enhanced ping system with timing metrics
+// Enhanced ping system with improved connection tracking
 const pingAllClients = () => {
+  const currentTime = Date.now();
   let activePings = 0;
   let closedConnections = 0;
-  const currentTime = Date.now();
   
   wss.clients.forEach((ws) => {
-    if (ws.isAlive === false) {
-      closedConnections++;
+    // Initialize connection tracking data if not exists
+    if (!ws.pingStats) {
+      ws.pingStats = {
+        missedPings: 0,
+        totalPings: 0,
+        successfulPongs: 0,
+        pingHistory: [],  // Array of {sent, received, latency}
+        lastPingTime: 0,
+        reliability: 1.0
+      };
+    }
+    
+    // Check if previous ping timed out
+    if (ws.lastPingTime && currentTime - ws.lastPingTime > CONNECTION_HEALTH.PING_TIMEOUT) {
+      ws.pingStats.missedPings++;
       
-      // Record disconnection history for analysis
-      if (!ws.pingHistory) {
-        ws.pingHistory = [];
+      // Add a missed ping to history
+      if (ws.pingStats.pingHistory.length >= CONNECTION_HEALTH.HEALTH_WINDOW_SIZE) {
+        ws.pingStats.pingHistory.shift(); // Remove oldest entry
       }
       
-      // Add a final disconnection entry
-      ws.pingHistory.push({
-        status: 'disconnected',
-        timestamp: currentTime
+      ws.pingStats.pingHistory.push({
+        sent: ws.lastPingTime,
+        received: null,
+        latency: null,
+        missed: true
       });
+      
+      // Update reliability metric (% of successful pongs in window)
+      const recentHistory = ws.pingStats.pingHistory;
+      const successfulPongs = recentHistory.filter(ping => !ping.missed).length;
+      ws.pingStats.reliability = recentHistory.length > 0 ? 
+        successfulPongs / recentHistory.length : 1.0;
+      
+      console.log(`Client ${ws.userId || 'unknown'} missed ping, reliability: ${ws.pingStats.reliability.toFixed(2)}`);
+    }
+    
+    // Check if connection is considered dead (too many consecutive missed pings)
+    if (ws.pingStats.missedPings >= CONNECTION_HEALTH.MAX_MISSED_PINGS) {
+      closedConnections++;
+      console.log(`Terminating connection for ${ws.userId || 'unknown'} after ${ws.pingStats.missedPings} consecutive missed pings`);
+      
+      // Record disconnection event
+      if (ws.pingHistory) {
+      ws.pingHistory.push({
+          status: 'disconnected-timeout',
+          timestamp: currentTime,
+          reliability: ws.pingStats.reliability
+      });
+      }
       
       handleDisconnection(ws);
       ws.terminate();
       return;
     }
     
-    // Initialize ping tracking if not exists
-    if (!ws.pingHistory) {
-      ws.pingHistory = [];
-    }
-    
-    // Initialize ping timestamp for timing measurement
+    // Send new ping
     ws.lastPingTime = currentTime;
+    ws.pingStats.totalPings++;
+    ws.pingStats.missedPings = 0; // Reset consecutive missed pings counter when sending new ping
     
-    // Mark as not alive until pong received
-    ws.isAlive = false;
-    
-    // Send ping with current timestamp
-    const pingData = JSON.stringify({ type: 'ping', timestamp: currentTime });
     try {
-      // Use a binary ping for WebSocket protocol pings (faster)
+      // Send WebSocket protocol ping
       ws.ping();
       
-      // Also send an application-level ping to measure app-level latency
+      // Also send application-level ping to measure app-level latency
       if (ws.readyState === WebSocket.OPEN) {
+        const pingData = JSON.stringify({ type: 'ping', timestamp: currentTime });
         ws.send(pingData);
       }
       
       activePings++;
       
-      // Add ping attempt to history (limited to last 50 entries)
+      // Add ping attempt to limited history
+      if (ws.pingHistory) {
       ws.pingHistory.push({
         status: 'ping-sent',
         timestamp: currentTime
@@ -688,16 +909,121 @@ const pingAllClients = () => {
       
       if (ws.pingHistory.length > 50) {
         ws.pingHistory.shift();
+        }
       }
     } catch (error) {
-      console.error(`Error sending ping to client:`, error.message);
-      ws.isAlive = false;
+      console.error(`Error sending ping to client ${ws.userId || 'unknown'}:`, error.message);
+      ws.pingStats.missedPings++;
     }
   });
   
   // Only log if there's activity to reduce noise
   if (closedConnections > 0) {
     console.log(`Ping cycle: ${activePings} active, ${closedConnections} terminated`);
+  }
+};
+
+// Enhanced pong handler with improved connection tracking
+const handlePong = function(ws, timestamp) {
+  const pongTime = Date.now();
+  
+  if (!ws.pingStats) {
+    ws.pingStats = {
+      missedPings: 0,
+      totalPings: 0,
+      successfulPongs: 0,
+      pingHistory: [],
+      lastPingTime: 0,
+      reliability: 1.0
+    };
+  }
+  
+  // Calculate latency
+  const pingLatency = ws.lastPingTime ? pongTime - ws.lastPingTime : null;
+  
+  // Record successful pong
+  ws.pingStats.missedPings = 0; // Reset on successful pong
+  ws.pingStats.successfulPongs++;
+  
+  // Add to ping history
+  if (ws.pingStats.pingHistory.length >= CONNECTION_HEALTH.HEALTH_WINDOW_SIZE) {
+    ws.pingStats.pingHistory.shift(); // Remove oldest entry
+  }
+  
+  ws.pingStats.pingHistory.push({
+    sent: ws.lastPingTime,
+    received: pongTime,
+    latency: pingLatency,
+    missed: false
+  });
+  
+  // Update connection quality metrics
+  
+  // Calculate average latency
+  const validLatencies = ws.pingStats.pingHistory
+    .filter(ping => ping.latency !== null)
+    .map(ping => ping.latency);
+  
+  const avgLatency = validLatencies.length > 0 ? 
+    validLatencies.reduce((sum, latency) => sum + latency, 0) / validLatencies.length : null;
+  
+  // Calculate jitter (standard deviation of latencies)
+  let jitter = null;
+  if (validLatencies.length > 1) {
+    const mean = avgLatency;
+    const squaredDiffs = validLatencies.map(l => Math.pow(l - mean, 2));
+    const variance = squaredDiffs.reduce((a, b) => a + b, 0) / validLatencies.length;
+    jitter = Math.round(Math.sqrt(variance));
+  }
+  
+  // Update reliability metric (% of successful pongs in window)
+  const recentHistory = ws.pingStats.pingHistory;
+  const successfulPongs = recentHistory.filter(ping => !ping.missed).length;
+  ws.pingStats.reliability = recentHistory.length > 0 ? 
+    successfulPongs / recentHistory.length : 1.0;
+  
+  // Update connection quality data
+  if (!ws.connectionQuality) {
+    ws.connectionQuality = {
+      avgLatency: 0,
+      jitter: 0,
+      reliability: 100,
+      lastUpdated: Date.now(),
+      connectionRating: 'Unknown'
+    };
+  }
+  
+  ws.connectionQuality.avgLatency = avgLatency ? Math.round(avgLatency) : ws.connectionQuality.avgLatency;
+  ws.connectionQuality.jitter = jitter !== null ? jitter : ws.connectionQuality.jitter;
+  ws.connectionQuality.reliability = Math.round(ws.pingStats.reliability * 100);
+  ws.connectionQuality.lastUpdated = pongTime;
+  
+  // Calculate connection rating
+  let connectionRating;
+  if (ws.pingStats.reliability < CONNECTION_HEALTH.RELIABILITY_THRESHOLD_POOR) {
+    connectionRating = 'Poor';
+  } else if (ws.pingStats.reliability < CONNECTION_HEALTH.RELIABILITY_THRESHOLD_FAIR) {
+    connectionRating = 'Fair';
+  } else if (ws.pingStats.reliability < CONNECTION_HEALTH.RELIABILITY_THRESHOLD_GOOD) {
+    connectionRating = 'Good';
+  } else {
+    connectionRating = 'Excellent';
+  }
+  
+  ws.connectionQuality.connectionRating = connectionRating;
+  
+  // Add to history for debugging
+  if (ws.pingHistory) {
+    ws.pingHistory.push({
+      status: 'pong-received',
+      timestamp: pongTime,
+      latency: pingLatency,
+      reliability: ws.pingStats.reliability
+    });
+    
+    if (ws.pingHistory.length > 50) {
+      ws.pingHistory.shift();
+    }
   }
 };
 
@@ -731,7 +1057,7 @@ function handleDisconnection(ws) {
         const newHost = room.get(newHostId);
         broadcastToRoom(
           roomId,
-          messageTemplates.hostChanged(userId, newHostId, newHost.userName)
+          messageTemplates.hostChanged(userId, newHostId, newHost.userName, true)
         );
         console.log(`Host role transferred from ${userId} to ${newHostId} in room ${roomId}`);
       }
@@ -741,8 +1067,11 @@ function handleDisconnection(ws) {
   // Set a shorter timeout for host reconnection
   const timeoutDuration = wasHost ? 15000 : 30000; // 15 seconds for host, 30 for others
 
-  // Create a unique timeout key for this disconnection
-  const timeoutKey = `${userId}-${Date.now()}`;
+  // Clear any existing timeout to prevent memory leaks
+  if (user.disconnectTimeout) {
+    clearTimeout(user.disconnectTimeout);
+    user.disconnectTimeout = null;
+  }
   
   // Store the timeout so we can clear it if user reconnects
   user.disconnectTimeout = setTimeout(() => {
@@ -836,16 +1165,24 @@ const pingIntervalId = setInterval(pingAllClients, PING_INTERVAL);
 // WebSocket connection handler
 wss.on('connection', (ws) => {
   // Initialize connection state
-  ws.isAlive = true;
+  ws.lastPingTime = null;
   ws.userId = null;
   ws.roomId = null;
-  ws.lastPingTime = Date.now();
   ws.pingHistory = [];
+  ws.pingStats = {
+    missedPings: 0,
+    totalPings: 0,
+    successfulPongs: 0,
+    pingHistory: [],
+    lastPingTime: 0,
+    reliability: 1.0
+  };
   ws.connectionQuality = {
     avgLatency: 0,
     jitter: 0,
     reliability: 100,
-    lastPingTimestamp: Date.now()
+    lastUpdated: Date.now(),
+    connectionRating: 'Unknown'
   };
 
   // Update metrics
@@ -853,48 +1190,10 @@ wss.on('connection', (ws) => {
   
   // Enhanced pong handler with timing information
   ws.on('pong', () => {
-    const pongTime = Date.now();
-    ws.isAlive = true;
-    
-    // If we have a ping timestamp, calculate latency
-    if (ws.lastPingTime) {
-      const pingLatency = pongTime - ws.lastPingTime;
-      
-      // Update connection quality metrics
-      if (!ws.connectionQuality.latencies) {
-        ws.connectionQuality.latencies = [];
-      }
-      
-      // Store latest latency
-      ws.connectionQuality.latencies.push(pingLatency);
-      
-      // Keep only last 10 measurements
-      if (ws.connectionQuality.latencies.length > 10) {
-        ws.connectionQuality.latencies.shift();
-      }
-      
-      // Calculate average latency
-      const sum = ws.connectionQuality.latencies.reduce((a, b) => a + b, 0);
-      ws.connectionQuality.avgLatency = Math.round(sum / ws.connectionQuality.latencies.length);
-      
-      // Calculate jitter (standard deviation of latencies)
-      if (ws.connectionQuality.latencies.length > 1) {
-        const mean = ws.connectionQuality.avgLatency;
-        const squaredDiffs = ws.connectionQuality.latencies.map(l => Math.pow(l - mean, 2));
-        const variance = squaredDiffs.reduce((a, b) => a + b, 0) / ws.connectionQuality.latencies.length;
-        ws.connectionQuality.jitter = Math.round(Math.sqrt(variance));
-      }
-      
-      // Add to ping history
-      ws.pingHistory.push({
-        status: 'pong-received',
-        timestamp: pongTime,
-        latency: pingLatency
-      });
-    }
+    handlePong(ws);
   });
 
-  // Enhanced message handler with application-level ping/pong support
+  // Enhanced message handler with better application-level ping/pong support
   ws.on('message', (message) => {
     let data;
     
@@ -905,6 +1204,11 @@ wss.on('connection', (ws) => {
       console.error('Invalid message format:', error.message);
       sendError(ws, 'invalid-message-format', 'Message must be valid JSON');
       return;
+    }
+    
+    // Log received message types for debugging (except frequent messages)
+    if (data.type !== 'ping' && data.type !== 'pong') {
+      console.log(`Received message type: ${data.type} from user ${ws.userId || 'unknown'}`);
     }
     
     // Handle application-level ping
@@ -963,7 +1267,13 @@ wss.on('connection', (ws) => {
       'leave': handleLeave,
       'close-room': handleCloseRoom,
       'message': handleChatMessage,
-      'host-command': handleHostCommand
+      'host-command': handleHostCommand,
+      // Make sure confirmation responses are handled
+      'confirm-command': (ws, data) => {
+        // Simply pass the confirmation to the host command handler
+        console.log(`Received command confirmation for: ${data.command}`);
+        handleHostCommand(ws, data);
+      }
     };
     
     const handler = handlers[data.type];
@@ -1066,7 +1376,7 @@ function handleJoin(ws, data) {
   ws.send(messageTemplates.roomJoined(roomId, participants, shouldBeHost));
 }
 
-// Handler for reconnect requests
+// Fix reconnection handling to properly restore host status
 function handleReconnect(ws, data) {
   const { userId, roomId, userName } = data;
   
@@ -1104,29 +1414,34 @@ function handleReconnect(ws, data) {
       existingUser.disconnectTimeout = null;
     }
     
+    // IMPORTANT FIX: Ensure we attach the WebSocket object to the existing user record
     existingUser.ws = ws;
     existingUser.connected = true;
     existingUser.disconnectedAt = null;
     existingUser.audioEnabled = previousAudioState;
     existingUser.videoEnabled = previousVideoState;
     
-    console.log(`User ${userName} (${userId}) reconnected to room ${roomId}`);
+    console.log(`User ${userName} (${userId}) reconnected to room ${roomId}, host status: ${existingUser.isHost}`);
     
-    // If this user was previously the host, check if the role was transferred
+    // FIX: Check for host status mismatch between session and room data
     if (session.isHost && !existingUser.isHost) {
-      // Notify the reconnected user that they are no longer the host
+      // Host role was transferred while disconnected - notify user
       ws.send(JSON.stringify({
         type: 'host-status-changed',
         isHost: false,
         message: 'Host role was transferred during your disconnection'
       }));
+    } else if (!session.isHost && existingUser.isHost) {
+      // FIX: Session might be out of sync with room data, update it
+      session.isHost = true;
+      console.log(`Updated session host status for ${userId} to match room data (isHost: true)`);
     }
     
     // Notify others about reconnection with media state
     broadcastToRoom(
       roomId, 
       messageTemplates.userReconnected(
-        userId, userName, wasHost, previousAudioState, previousVideoState
+        userId, userName, existingUser.isHost, previousAudioState, previousVideoState
       ), 
       userId
     );
@@ -1145,6 +1460,7 @@ function handleReconnect(ws, data) {
     ws.send(messageTemplates.roomRejoined(roomId, participants, existingUser.isHost));
   } else {
     // User not found in room but has valid session - handle as new join
+    console.log(`User ${userName} (${userId}) not found in room ${roomId} but has valid session, rejoining as host: ${session.isHost}`);
     handleJoin(ws, {
       ...data,
       isHost: session.isHost
@@ -1192,7 +1508,7 @@ function handleSignaling(ws, data) {
   }
 }
 
-// Handler for leave room requests
+// Improve host transfer when original host leaves
 function handleLeave(ws, data) {
   const { userId, roomId, userName } = data;
   
@@ -1202,7 +1518,33 @@ function handleLeave(ws, data) {
   
   console.log(`User ${userName || userId} is leaving room ${roomId}`);
   
-  // Remove user from room
+  // Check if user is host before removing
+  const room = rooms.get(roomId);
+  if (room) {
+    const user = room.get(userId);
+    const isHost = user && user.isHost;
+    
+    if (isHost) {
+      console.log(`Host ${userId} is leaving room ${roomId}, selecting new host`);
+      // Find a new host before removing current one
+      const newHostId = findNewHostCandidate(room, userId);
+      if (newHostId) {
+        const newHost = room.get(newHostId);
+        if (transferHostRole(roomId, userId, newHostId)) {
+          // Notify all clients about host change
+          broadcastToRoom(roomId, JSON.parse(messageTemplates.hostChanged(
+            userId, newHostId, newHost.userName, true // permanent transfer
+          )));
+          
+          console.log(`Host role successfully transferred from ${userId} to ${newHostId}`);
+        }
+      } else {
+        console.log(`No suitable host found, room ${roomId} will be closed when empty`);
+      }
+    }
+  }
+  
+  // Now remove the user
   removeUserFromRoom(userId, roomId);
   
   // Clear connection info
@@ -1213,7 +1555,198 @@ function handleLeave(ws, data) {
   ws.send(messageTemplates.leaveConfirmed());
 }
 
-// Handler for close room requests (host only)
+// Fix for "remove all participants" command in handleHostCommand function
+function handleHostCommand(ws, data) {
+  const { command, roomId, targetUserId, confirmationToken } = data;
+  const userId = ws.userId;
+  
+  if (!userId || !roomId || !command) {
+    return sendError(ws, 'missing-parameters', 'Missing required parameters for host command');
+  }
+  
+  console.log(`Received host command '${command}' from ${userId} in room ${roomId}`);
+  
+  // Check if room exists
+  if (!rooms.has(roomId)) {
+    return sendError(ws, 'room-not-found', 'The room does not exist');
+  }
+  
+  const room = rooms.get(roomId);
+  const user = room.get(userId);
+  
+  // Verify user is in the room
+  if (!user) {
+    console.error(`User ${userId} not found in room ${roomId} when attempting host command`);
+    return sendError(ws, 'not-in-room', 'You are not in this room');
+  }
+  
+  // Verify host status with detailed error reporting
+  if (!user.isHost) {
+    console.error(`User ${userId} attempted host command '${command}' but is not a host`);
+    return sendError(ws, 'not-authorized', 'Only the host can issue commands');
+  }
+  
+  // Check rate limits
+  if (!checkCommandRateLimit(userId, command)) {
+    serverMetrics.recordError('host-command-rate-limit');
+    return sendError(ws, 'rate-limited', `You've used this command too many times. Please wait before trying again.`);
+  }
+  
+  // Check if confirmation is required for destructive commands
+  if (HOST_COMMAND_LIMITS.CONFIRMATION_REQUIRED.includes(command)) {
+    const expectedToken = `${userId}-${roomId}-${command}`;
+    
+    // Require confirmation token for destructive commands
+    if (!confirmationToken || confirmationToken !== expectedToken) {
+      console.log(`Requesting confirmation for command '${command}' from user ${userId}`);
+      
+      // First request: send confirmation required response
+      ws.send(JSON.stringify({
+        type: 'confirmation-required',
+        command: command,
+        confirmationToken: expectedToken,
+        message: `Please confirm this potentially destructive action: ${command}`
+      }));
+      return;
+    }
+    
+    // Log the destructive command execution
+    console.log(`[SECURITY] Host ${userId} executed destructive command: ${command} in room ${roomId} with valid confirmation`);
+  }
+  
+  // Process commands with additional validation
+  switch (command) {
+    case 'mute-all':
+      // Check if there are actually other users to mute
+      let muteCount = 0;
+      
+      // Update all participants' audio state
+      room.forEach((participant, participantId) => {
+        if (participantId !== userId && participant.audioEnabled) { // Don't mute the host and only count those who are unmuted
+          participant.audioEnabled = false;
+          muteCount++;
+        }
+      });
+      
+      if (muteCount === 0) {
+        return sendError(ws, 'command-redundant', 'All participants are already muted');
+      }
+      
+      // Broadcast command to all users
+      broadcastToRoom(roomId, {
+        type: 'host-command',
+        command: 'mute-all',
+        hostId: userId,
+        hostName: user.userName
+      });
+      
+      // Log the action
+      console.log(`Host ${userId} muted all ${muteCount} participants in room ${roomId}`);
+      break;
+      
+    case 'remove-all':
+      let removalCount = 0;
+      let participantsToRemove = [];
+      
+      // First collect all participants to remove (except host)
+      for (const [participantId, participant] of room.entries()) {
+        if (participantId !== userId) {
+          participantsToRemove.push(participantId);
+        }
+      }
+      
+      // No participants to remove
+      if (participantsToRemove.length === 0) {
+        return sendError(ws, 'command-redundant', 'No other participants to remove');
+      }
+      
+      console.log(`Host ${userId} removing all ${participantsToRemove.length} participants from room ${roomId}`);
+      
+      // Then remove each participant (separated to avoid modifying map during iteration)
+      for (const participantId of participantsToRemove) {
+        const participant = room.get(participantId);
+        
+        if (participant) {
+          // Notify the participant before removing
+          if (participant.ws && participant.ws.readyState === WebSocket.OPEN) {
+            try {
+              participant.ws.send(JSON.stringify({
+                type: 'host-command',
+                command: 'remove-user',
+                hostId: userId,
+                hostName: user.userName,
+                reason: data.reason || 'Removed by host'
+              }));
+            } catch (error) {
+              console.error(`Error notifying user ${participantId} about removal:`, error.message);
+            }
+          }
+          
+          // Remove from room and user sessions
+          room.delete(participantId);
+          userSessions.delete(participantId);
+          removalCount++;
+        }
+      }
+      
+      // Log the action
+      console.log(`[SECURITY] Host ${userId} successfully removed all ${removalCount} participants from room ${roomId}`);
+      
+      // Confirm to host
+      ws.send(JSON.stringify({
+        type: 'command-executed',
+        command: 'remove-all',
+        affectedCount: removalCount
+      }));
+      break;
+      
+    case 'remove-user':
+      if (!targetUserId) {
+        return sendError(ws, 'missing-parameters', 'Target user ID is required');
+      }
+      
+      // Cannot remove self through this command
+      if (targetUserId === userId) {
+        return sendError(ws, 'invalid-operation', 'You cannot remove yourself with this command');
+      }
+      
+      const targetUser = room.get(targetUserId);
+      if (!targetUser) {
+        return sendError(ws, 'user-not-found', 'The specified user is not in the room');
+      }
+      
+      if (targetUser.ws && targetUser.ws.readyState === WebSocket.OPEN) {
+        targetUser.ws.send(JSON.stringify({
+          type: 'host-command',
+          command: 'remove-user',
+          hostId: userId,
+          hostName: user.userName,
+          reason: data.reason || 'Removed by host'
+        }));
+        targetUser.ws.terminate();
+      }
+      room.delete(targetUserId);
+      userSessions.delete(targetUserId);
+      
+      // Notify others
+      broadcastToRoom(roomId, {
+        type: 'user-removed',
+        userId: targetUserId,
+        removedBy: userId,
+        removedByName: user.userName,
+        reason: data.reason || 'Removed by host'
+      });
+      
+      // Log the action
+      console.log(`Host ${userId} removed user ${targetUserId} from room ${roomId}`);
+      break;
+      
+    default:
+      return sendError(ws, 'invalid-command', `Unknown host command: ${command}`);
+  }
+}
+
+// Apply the same fixes to handleCloseRoom
 function handleCloseRoom(ws, data) {
   const { userId, roomId, userName } = data;
   
@@ -1229,9 +1762,32 @@ function handleCloseRoom(ws, data) {
   const room = rooms.get(roomId);
   const user = room.get(userId);
   
-  // Verify user is the host
-  if (!user || !user.isHost) {
-    return sendError(ws, 'not-authorized', 'Only the host can close the room');
+  // Enhanced host status verification with detailed logging
+  if (!user) {
+    console.error(`User ${userId} not found in room ${roomId} when attempting to close room`);
+    return sendError(ws, 'not-in-room', 'You are not in this room');
+  }
+  
+  // Verify this is the active connection for this user
+  const isActiveConnection = (user.ws === ws);
+  if (!isActiveConnection) {
+    console.error(`WebSocket mismatch for user ${userId} when closing room - updating reference`);
+    user.ws = ws; // Update the reference to this current WebSocket
+  }
+  
+  // Verify host status with fallback to session data
+  if (!user.isHost) {
+    const session = userSessions.get(userId);
+    
+    console.error(`User ${userId} attempted to close room but isHost=${user.isHost}, sessionHost=${session?.isHost || false}`);
+    
+    if (session && session.isHost) {
+      // Fix inconsistency
+      console.log(`Fixing host status inconsistency for ${userId} before closing room`);
+      user.isHost = true;
+    } else {
+      return sendError(ws, 'not-authorized', 'Only the host can close the room');
+    }
   }
   
   console.log(`Host ${userName || userId} is closing room ${roomId}`);
@@ -1333,99 +1889,6 @@ function handleChatMessage(ws, data) {
   } else {
     // Broadcast to all users in the room
     broadcastToRoom(roomId, messageObj);
-  }
-}
-
-// Handler for host commands
-function handleHostCommand(ws, data) {
-  const { command, roomId, targetUserId } = data;
-  const userId = ws.userId;
-  
-  if (!userId || !roomId || !command) {
-    return sendError(ws, 'missing-parameters', 'Missing required parameters for host command');
-  }
-  
-  // Check if room exists
-  if (!rooms.has(roomId)) {
-    return sendError(ws, 'room-not-found', 'The room does not exist');
-  }
-  
-  const room = rooms.get(roomId);
-  const user = room.get(userId);
-  
-  // Verify user is the host
-  if (!user || !user.isHost) {
-    return sendError(ws, 'not-authorized', 'Only the host can issue commands');
-  }
-  
-  // Process command
-  switch (command) {
-    case 'mute-all':
-      // Update all participants' audio state
-      room.forEach((participant, participantId) => {
-        if (participantId !== userId) { // Don't mute the host
-          participant.audioEnabled = false;
-        }
-      });
-      
-      // Broadcast command to all users
-      broadcastToRoom(roomId, {
-        type: 'host-command',
-        command: 'mute-all',
-        hostId: userId,
-        hostName: user.userName
-      });
-      break;
-      
-    case 'remove-all':
-      // Terminate all connections except host
-      room.forEach((participant, participantId) => {
-        if (participantId !== userId) {
-          if (participant.ws && participant.ws.readyState === WebSocket.OPEN) {
-            participant.ws.send(JSON.stringify({
-              type: 'host-command',
-              command: 'remove-all',
-              hostId: userId,
-              hostName: user.userName
-            }));
-            participant.ws.terminate();
-          }
-          room.delete(participantId);
-          userSessions.delete(participantId);
-        }
-      });
-      break;
-      
-    case 'remove-user':
-      if (!targetUserId) {
-        return sendError(ws, 'missing-parameters', 'Target user ID is required');
-      }
-      
-      const targetUser = room.get(targetUserId);
-      if (targetUser) {
-        if (targetUser.ws && targetUser.ws.readyState === WebSocket.OPEN) {
-          targetUser.ws.send(JSON.stringify({
-            type: 'host-command',
-            command: 'remove-user',
-            hostId: userId,
-            hostName: user.userName
-          }));
-          targetUser.ws.terminate();
-        }
-        room.delete(targetUserId);
-        userSessions.delete(targetUserId);
-        
-        // Notify others
-        broadcastToRoom(roomId, {
-          type: 'user-removed',
-          userId: targetUserId,
-          removedBy: userId
-        });
-      }
-      break;
-      
-    default:
-      return sendError(ws, 'invalid-command', `Unknown host command: ${command}`);
   }
 }
 
